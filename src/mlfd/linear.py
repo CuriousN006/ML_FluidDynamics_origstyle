@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from .config import LinearConfig, ProjectPaths
-from .data import load_field_bundle
+from .data import convert_field_layout, load_field_bundle
 from .metrics import nrmse, relative_l2, rmse
 from .plots import (
     save_comparison_panel,
@@ -70,6 +70,7 @@ def run_linear_pipeline(config: LinearConfig | None = None, paths: ProjectPaths 
     compare_steps = _compare_steps(config.compare_steps, bundle.num_snapshots)
     output_dir = paths.linear_dir / output_tag
     output_dir.mkdir(parents=True, exist_ok=True)
+    zoom_crop = (0, 240, 20, 180)
 
     matrix = bundle.matrix
     u, s, vh = np.linalg.svd(matrix, full_matrices=False)
@@ -100,6 +101,21 @@ def run_linear_pipeline(config: LinearConfig | None = None, paths: ProjectPaths 
             output_dir / f"truncated_reconstruction_step_{step}.png",
             f"Truncated SVD reconstruction | step {step}",
         )
+        save_comparison_panel(
+            convert_field_layout(true_snapshot, bundle.width, bundle.height),
+            convert_field_layout(pred_snapshot, bundle.width, bundle.height),
+            output_dir / f"truncated_reconstruction_step_{step}_portrait_full.png",
+            f"Truncated SVD reconstruction portrait | step {step}",
+            error_percentile=99.0,
+        )
+        save_comparison_panel(
+            convert_field_layout(true_snapshot, bundle.width, bundle.height),
+            convert_field_layout(pred_snapshot, bundle.width, bundle.height),
+            output_dir / f"truncated_reconstruction_step_{step}_portrait_wake.png",
+            f"Truncated SVD reconstruction wake | step {step}",
+            crop=zoom_crop,
+            error_percentile=99.0,
+        )
 
     linear_operator, predicted_weights = _fit_linear_dynamics(weights)
     linear_eigs = np.linalg.eigvals(linear_operator)
@@ -119,6 +135,21 @@ def run_linear_pipeline(config: LinearConfig | None = None, paths: ProjectPaths 
             pred_snapshot,
             output_dir / f"linear_rollout_step_{step}.png",
             f"Linear latent rollout | step {step}",
+        )
+        save_comparison_panel(
+            convert_field_layout(true_snapshot, bundle.width, bundle.height),
+            convert_field_layout(pred_snapshot, bundle.width, bundle.height),
+            output_dir / f"linear_rollout_step_{step}_portrait_full.png",
+            f"Linear latent rollout portrait | step {step}",
+            error_percentile=99.0,
+        )
+        save_comparison_panel(
+            convert_field_layout(true_snapshot, bundle.width, bundle.height),
+            convert_field_layout(pred_snapshot, bundle.width, bundle.height),
+            output_dir / f"linear_rollout_step_{step}_portrait_wake.png",
+            f"Linear latent rollout wake | step {step}",
+            crop=zoom_crop,
+            error_percentile=99.0,
         )
 
     dmd_dir = output_dir / "dmd"
@@ -167,6 +198,21 @@ def run_linear_pipeline(config: LinearConfig | None = None, paths: ProjectPaths 
                 pred_snapshot,
                 dmd_dir / f"best_rank_step_{step}.png",
                 f"DMD best rank={best_rank} | step {step}",
+            )
+            save_comparison_panel(
+                convert_field_layout(true_snapshot, bundle.width, bundle.height),
+                convert_field_layout(pred_snapshot, bundle.width, bundle.height),
+                dmd_dir / f"best_rank_step_{step}_portrait_full.png",
+                f"DMD best rank={best_rank} portrait | step {step}",
+                error_percentile=99.0,
+            )
+            save_comparison_panel(
+                convert_field_layout(true_snapshot, bundle.width, bundle.height),
+                convert_field_layout(pred_snapshot, bundle.width, bundle.height),
+                dmd_dir / f"best_rank_step_{step}_portrait_wake.png",
+                f"DMD best rank={best_rank} wake | step {step}",
+                crop=zoom_crop,
+                error_percentile=99.0,
             )
 
     metrics = {

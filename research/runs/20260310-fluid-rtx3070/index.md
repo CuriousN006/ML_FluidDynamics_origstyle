@@ -27,10 +27,16 @@
 - exp-0023 | discard | score=0.022191 | Reg-1: latent L1 only under dual plateau deterministic=false
 - exp-0024 | discard | score=0.020955 | Reg-2: dynamics L2 only under dual plateau deterministic=false
 - exp-0025 | discard | score=0.022281 | Reg-4: strong AE+dyn regularizers under dual plateau deterministic=false
+- exp-0026 | keep | score=0.001830 | Stage 1: portrait layout parity with baseline AE + MLP dynamics
+- exp-0027 | keep | score=0.001736 | Stage 2: portrait baseline AE with residual linear dynamics
+- exp-0028 | keep | score=0.000710 | Stage 3: portrait residual autoencoder with residual linear dynamics
+- exp-0029 | discard | score=0.154054 | Stage 4A: residual AE + residual linear dynamics with lower gradient loss weight
+- exp-0030 | discard | score=0.000835 | Stage 4B: residual AE + residual linear dynamics with shorter train rollout horizon
+- exp-0031 | discard | score=0.013512 | Stage 4C: portrait residual AE + residual linear dynamics with deterministic=false
 
 ## Best Model Changes
 
-- Current best: exp-0021 (0.020250)
+- Current best: exp-0028 (0.000710)
 
 ## Open Risks
 

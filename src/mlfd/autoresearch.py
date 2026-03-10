@@ -19,14 +19,22 @@ def _default_command(
     output_tag: str,
     smoke: bool,
     *,
+    layout: str | None = None,
+    ae_architecture: str | None = None,
+    dynamics_model: str | None = None,
     ae_epochs: int | None = None,
     dyn_epochs: int | None = None,
     latent_dim: int | None = None,
     ae_learning_rate: float | None = None,
     dyn_learning_rate: float | None = None,
     rollout_loss_weight: float | None = None,
+    gradient_loss_weight: float | None = None,
     dynamics_depth: int | None = None,
     dynamics_hidden_dim: int | None = None,
+    train_rollout_stride: int | None = None,
+    train_rollout_horizon: int | None = None,
+    validation_rollout_stride: int | None = None,
+    validation_rollout_horizon: int | None = None,
     ae_scheduler: str | None = None,
     dyn_scheduler: str | None = None,
     ae_scheduler_factor: float | None = None,
@@ -43,14 +51,22 @@ def _default_command(
     command = [sys.executable, "-m", "mlfd.run_nonlinear", "--output-tag", output_tag]
     if smoke:
         command.append("--smoke")
+    _append_optional(command, "--layout", layout)
+    _append_optional(command, "--ae-architecture", ae_architecture)
+    _append_optional(command, "--dynamics-model", dynamics_model)
     _append_optional(command, "--ae-epochs", ae_epochs)
     _append_optional(command, "--dyn-epochs", dyn_epochs)
     _append_optional(command, "--latent-dim", latent_dim)
     _append_optional(command, "--ae-learning-rate", ae_learning_rate)
     _append_optional(command, "--dyn-learning-rate", dyn_learning_rate)
     _append_optional(command, "--rollout-loss-weight", rollout_loss_weight)
+    _append_optional(command, "--gradient-loss-weight", gradient_loss_weight)
     _append_optional(command, "--dynamics-depth", dynamics_depth)
     _append_optional(command, "--dynamics-hidden-dim", dynamics_hidden_dim)
+    _append_optional(command, "--train-rollout-stride", train_rollout_stride)
+    _append_optional(command, "--train-rollout-horizon", train_rollout_horizon)
+    _append_optional(command, "--validation-rollout-stride", validation_rollout_stride)
+    _append_optional(command, "--validation-rollout-horizon", validation_rollout_horizon)
     _append_optional(command, "--ae-scheduler", ae_scheduler)
     _append_optional(command, "--dyn-scheduler", dyn_scheduler)
     _append_optional(command, "--ae-scheduler-factor", ae_scheduler_factor)
@@ -98,14 +114,22 @@ def main() -> None:
     run_parser.add_argument("--run-tag", default=ProjectPaths().run_tag)
     run_parser.add_argument("--smoke", action="store_true")
     run_parser.add_argument("--next-hypothesis", default="")
+    run_parser.add_argument("--layout", choices=["landscape", "portrait"], default=None)
+    run_parser.add_argument("--ae-architecture", choices=["baseline", "residual"], default=None)
+    run_parser.add_argument("--dynamics-model", choices=["mlp", "residual_linear"], default=None)
     run_parser.add_argument("--ae-epochs", type=int, default=None)
     run_parser.add_argument("--dyn-epochs", type=int, default=None)
     run_parser.add_argument("--latent-dim", type=int, default=None)
     run_parser.add_argument("--ae-learning-rate", type=float, default=None)
     run_parser.add_argument("--dyn-learning-rate", type=float, default=None)
     run_parser.add_argument("--rollout-loss-weight", type=float, default=None)
+    run_parser.add_argument("--gradient-loss-weight", type=float, default=None)
     run_parser.add_argument("--dynamics-depth", type=int, default=None)
     run_parser.add_argument("--dynamics-hidden-dim", type=int, default=None)
+    run_parser.add_argument("--train-rollout-stride", type=int, default=None)
+    run_parser.add_argument("--train-rollout-horizon", type=int, default=None)
+    run_parser.add_argument("--validation-rollout-stride", type=int, default=None)
+    run_parser.add_argument("--validation-rollout-horizon", type=int, default=None)
     run_parser.add_argument("--ae-scheduler", choices=["none", "plateau"], default=None)
     run_parser.add_argument("--dyn-scheduler", choices=["none", "plateau"], default=None)
     run_parser.add_argument("--ae-scheduler-factor", type=float, default=None)
@@ -135,14 +159,22 @@ def main() -> None:
     command = _default_command(
         output_tag,
         args.smoke,
+        layout=args.layout,
+        ae_architecture=args.ae_architecture,
+        dynamics_model=args.dynamics_model,
         ae_epochs=args.ae_epochs,
         dyn_epochs=args.dyn_epochs,
         latent_dim=args.latent_dim,
         ae_learning_rate=args.ae_learning_rate,
         dyn_learning_rate=args.dyn_learning_rate,
         rollout_loss_weight=args.rollout_loss_weight,
+        gradient_loss_weight=args.gradient_loss_weight,
         dynamics_depth=args.dynamics_depth,
         dynamics_hidden_dim=args.dynamics_hidden_dim,
+        train_rollout_stride=args.train_rollout_stride,
+        train_rollout_horizon=args.train_rollout_horizon,
+        validation_rollout_stride=args.validation_rollout_stride,
+        validation_rollout_horizon=args.validation_rollout_horizon,
         ae_scheduler=args.ae_scheduler,
         dyn_scheduler=args.dyn_scheduler,
         ae_scheduler_factor=args.ae_scheduler_factor,

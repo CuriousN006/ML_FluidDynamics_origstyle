@@ -30,10 +30,31 @@ def _symmetric_limits(field: np.ndarray) -> tuple[float, float]:
     return -limit, limit
 
 
-def save_field_image(field: np.ndarray, path: Path, title: str, cmap: str = "RdBu_r", symmetric: bool = True) -> None:
-    fig, ax = plt.subplots(figsize=(4.5, 8.0))
+def _crop_field(field: np.ndarray, crop: tuple[int, int, int, int] | None) -> np.ndarray:
+    if crop is None:
+        return field
+    row_start, row_end, col_start, col_end = crop
+    return field[row_start:row_end, col_start:col_end]
+
+
+def _figure_size(field: np.ndarray, portrait_scale: float = 8.0) -> tuple[float, float]:
+    aspect = field.shape[0] / max(1, field.shape[1])
+    width = max(3.6, portrait_scale / max(1.2, aspect))
+    height = max(4.8, width * aspect)
+    return width, height
+
+
+def save_field_image(
+    field: np.ndarray,
+    path: Path,
+    title: str,
+    cmap: str = "RdBu_r",
+    symmetric: bool = True,
+    interpolation: str = "bilinear",
+) -> None:
+    fig, ax = plt.subplots(figsize=_figure_size(field))
     vmin, vmax = _symmetric_limits(field) if symmetric else (float(field.min()), float(field.max()))
-    im = ax.imshow(field, cmap=cmap, origin="upper", vmin=vmin, vmax=vmax)
+    im = ax.imshow(field, cmap=cmap, origin="upper", interpolation=interpolation, vmin=vmin, vmax=vmax)
     ax.set_title(title)
     ax.set_axis_off()
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
@@ -65,17 +86,33 @@ def save_complex_plane(eigenvalues: np.ndarray, path: Path, title: str) -> None:
     _save_figure(fig, path)
 
 
-def save_comparison_panel(true_field: np.ndarray, pred_field: np.ndarray, path: Path, title: str) -> None:
-    error = pred_field - true_field
-    fig, axes = plt.subplots(1, 3, figsize=(12, 6))
+def save_comparison_panel(
+    true_field: np.ndarray,
+    pred_field: np.ndarray,
+    path: Path,
+    title: str,
+    *,
+    crop: tuple[int, int, int, int] | None = None,
+    interpolation: str = "bilinear",
+    error_percentile: float | None = None,
+) -> None:
+    true_field = _crop_field(true_field, crop)
+    pred_field = _crop_field(pred_field, crop)
+    error = np.abs(pred_field - true_field)
+    fig, axes = plt.subplots(1, 3, figsize=(14, 8))
     vmin, vmax = _symmetric_limits(np.stack([true_field, pred_field]))
+    if error_percentile is None:
+        error_hi = float(error.max())
+    else:
+        error_hi = float(np.percentile(error, error_percentile))
+        error_hi = max(error_hi, 1e-8)
     images = [
         (true_field, "Ground Truth", "RdBu_r", vmin, vmax),
         (pred_field, "Prediction", "RdBu_r", vmin, vmax),
-        (error, "Error", "magma", float(error.min()), float(error.max())),
+        (error, "Absolute Error", "magma", 0.0, error_hi),
     ]
     for ax, (field, subtitle, cmap, lo, hi) in zip(axes, images, strict=True):
-        im = ax.imshow(field, cmap=cmap, origin="upper", vmin=lo, vmax=hi)
+        im = ax.imshow(field, cmap=cmap, origin="upper", interpolation=interpolation, vmin=lo, vmax=hi)
         ax.set_title(subtitle)
         ax.set_axis_off()
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)

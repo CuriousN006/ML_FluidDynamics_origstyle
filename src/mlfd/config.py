@@ -112,8 +112,11 @@ class LinearConfig:
 @dataclass(frozen=True)
 class NonlinearConfig:
     field_name: str = "VORTALL"
+    layout: str = "portrait"
     seed: int = 42
     latent_dim: int = 24
+    ae_architecture: str = "residual"
+    dynamics_model: str = "residual_linear"
     ae_epochs: int = 160
     dyn_epochs: int = 260
     batch_size: int = 16
@@ -122,6 +125,7 @@ class NonlinearConfig:
     weight_decay: float = 1e-5
     latent_l1_weight: float = 1e-4
     dyn_l2_weight: float = 1e-5
+    gradient_loss_weight: float = 0.1
     rollout_loss_weight: float = 0.15
     dynamics_hidden_dim: int = 64
     dynamics_depth: int = 2
@@ -134,11 +138,16 @@ class NonlinearConfig:
     ae_min_learning_rate: float = 1e-5
     dyn_min_learning_rate: float = 1e-5
     validation_rollout_weight: float = 0.25
-    validation_rollout_horizon: int = 12
+    train_rollout_stride: int = 8
+    train_rollout_horizon: int = 16
+    validation_rollout_stride: int = 4
+    validation_rollout_horizon: int = 24
     ae_train_ratio: float = 0.9
     dyn_train_ratio: float = 0.8
     early_stopping_patience: int = 20
     compare_steps: tuple[int, ...] = (100, 150)
+    zoom_crop: tuple[int, int, int, int] = (0, 240, 20, 180)
+    error_percentile: float = 99.0
     num_preview_images: int = 4
     device: str = "auto"
     deterministic: bool = True

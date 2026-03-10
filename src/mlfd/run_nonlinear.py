@@ -24,12 +24,20 @@ def apply_cli_overrides(config: NonlinearConfig, args: Namespace) -> NonlinearCo
     if args.smoke:
         config = config.smoke()
     override_fields = {
+        "layout": args.layout,
+        "ae_architecture": args.ae_architecture,
+        "dynamics_model": args.dynamics_model,
         "ae_epochs": args.ae_epochs,
         "dyn_epochs": args.dyn_epochs,
         "latent_dim": args.latent_dim,
         "rollout_loss_weight": args.rollout_loss_weight,
+        "gradient_loss_weight": args.gradient_loss_weight,
         "dynamics_depth": args.dynamics_depth,
         "dynamics_hidden_dim": args.dynamics_hidden_dim,
+        "train_rollout_stride": args.train_rollout_stride,
+        "train_rollout_horizon": args.train_rollout_horizon,
+        "validation_rollout_stride": args.validation_rollout_stride,
+        "validation_rollout_horizon": args.validation_rollout_horizon,
         "ae_learning_rate": args.ae_learning_rate,
         "dyn_learning_rate": args.dyn_learning_rate,
         "ae_scheduler": args.ae_scheduler,
@@ -55,6 +63,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the nonlinear fluid dynamics baseline.")
     parser.add_argument("--output-tag", default="baseline", help="Subdirectory name under output/nonlinear.")
     parser.add_argument("--smoke", action="store_true", help="Run a very short smoke configuration.")
+    parser.add_argument("--layout", choices=["landscape", "portrait"], default=None, help="Override frame layout.")
+    parser.add_argument(
+        "--ae-architecture",
+        choices=["baseline", "residual"],
+        default=None,
+        help="Override the autoencoder architecture.",
+    )
+    parser.add_argument(
+        "--dynamics-model",
+        choices=["mlp", "residual_linear"],
+        default=None,
+        help="Override the latent dynamics model type.",
+    )
     parser.add_argument("--ae-epochs", type=int, default=None, help="Override autoencoder epochs.")
     parser.add_argument("--dyn-epochs", type=int, default=None, help="Override dynamics epochs.")
     parser.add_argument("--latent-dim", type=int, default=None, help="Override latent dimension.")
@@ -67,6 +88,12 @@ def main() -> None:
         help="Override rollout loss weight in the latent dynamics model.",
     )
     parser.add_argument(
+        "--gradient-loss-weight",
+        type=float,
+        default=None,
+        help="Override the reconstruction gradient loss weight.",
+    )
+    parser.add_argument(
         "--dynamics-depth",
         type=int,
         default=None,
@@ -77,6 +104,20 @@ def main() -> None:
         type=int,
         default=None,
         help="Override the hidden width of the latent dynamics MLP.",
+    )
+    parser.add_argument("--train-rollout-stride", type=int, default=None, help="Override training rollout stride.")
+    parser.add_argument("--train-rollout-horizon", type=int, default=None, help="Override training rollout horizon.")
+    parser.add_argument(
+        "--validation-rollout-stride",
+        type=int,
+        default=None,
+        help="Override validation rollout stride.",
+    )
+    parser.add_argument(
+        "--validation-rollout-horizon",
+        type=int,
+        default=None,
+        help="Override validation rollout horizon.",
     )
     parser.add_argument(
         "--ae-scheduler",

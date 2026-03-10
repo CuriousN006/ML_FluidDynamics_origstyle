@@ -304,6 +304,9 @@ def _summarize_config(metrics: dict[str, float]) -> tuple[str, ...]:
         return ()
     summary = [
         f"field_name={config.get('field_name', 'n/a')}",
+        f"layout={config.get('layout', 'n/a')}",
+        f"ae_architecture={config.get('ae_architecture', 'n/a')}",
+        f"dynamics_model={config.get('dynamics_model', 'n/a')}",
         f"latent_dim={config.get('latent_dim', 'n/a')}",
         f"ae_epochs={config.get('ae_epochs', 'n/a')}",
         f"dyn_epochs={config.get('dyn_epochs', 'n/a')}",
@@ -313,7 +316,12 @@ def _summarize_config(metrics: dict[str, float]) -> tuple[str, ...]:
         f"dyn_scheduler={config.get('dyn_scheduler', 'n/a')}",
         f"latent_l1_weight={config.get('latent_l1_weight', 'n/a')}",
         f"dyn_l2_weight={config.get('dyn_l2_weight', 'n/a')}",
+        f"gradient_loss_weight={config.get('gradient_loss_weight', 'n/a')}",
         f"rollout_loss_weight={config.get('rollout_loss_weight', 'n/a')}",
+        f"train_rollout_stride={config.get('train_rollout_stride', 'n/a')}",
+        f"train_rollout_horizon={config.get('train_rollout_horizon', 'n/a')}",
+        f"validation_rollout_stride={config.get('validation_rollout_stride', 'n/a')}",
+        f"validation_rollout_horizon={config.get('validation_rollout_horizon', 'n/a')}",
         f"deterministic={config.get('deterministic', 'n/a')}",
     ]
     if config.get("ae_scheduler") == "plateau":

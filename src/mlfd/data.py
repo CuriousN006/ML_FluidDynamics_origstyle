@@ -20,6 +20,7 @@ FIELD_LABELS = {
 class FieldBundle:
     field_name: str
     field_label: str
+    layout: str
     matrix: np.ndarray
     frames: np.ndarray
     height: int
@@ -38,6 +39,7 @@ class FieldBundle:
         return {
             "field_name": self.field_name,
             "field_label": self.field_label,
+            "layout": self.layout,
             "matrix_shape": list(self.matrix.shape),
             "frames_shape": list(self.frames.shape),
             "height": self.height,
@@ -58,7 +60,19 @@ def _read_meta(mat_path: Path) -> tuple[int, int]:
     return height, width
 
 
-def load_field_bundle(field_name: str = "VORTALL", paths: ProjectPaths | None = None) -> FieldBundle:
+def _reshape_frames(matrix: np.ndarray, height: int, width: int) -> np.ndarray:
+    return matrix.T.reshape(matrix.shape[1], height, width)
+
+
+def convert_field_layout(field: np.ndarray, height: int, width: int) -> np.ndarray:
+    return field.reshape(-1).reshape(height, width)
+
+
+def load_field_bundle(
+    field_name: str = "VORTALL",
+    paths: ProjectPaths | None = None,
+    layout: str = "landscape",
+) -> FieldBundle:
     paths = paths or ProjectPaths()
     if not paths.data_file.exists():
         raise FileNotFoundError(f"Data file not found: {paths.data_file}")
@@ -73,14 +87,21 @@ def load_field_bundle(field_name: str = "VORTALL", paths: ProjectPaths | None = 
         raise ValueError(
             f"{field_name} has shape {matrix.shape}, which does not match {height}x{width} flattened data."
         )
-    frames = matrix.T.reshape(matrix.shape[1], height, width)
+    if layout == "landscape":
+        frame_height, frame_width = height, width
+    elif layout == "portrait":
+        frame_height, frame_width = width, height
+    else:
+        raise ValueError(f"Unsupported layout: {layout}")
+    frames = _reshape_frames(matrix, frame_height, frame_width)
     return FieldBundle(
         field_name=field_name,
         field_label=FIELD_LABELS.get(field_name, field_name.lower()),
+        layout=layout,
         matrix=matrix,
         frames=frames,
-        height=height,
-        width=width,
+        height=frame_height,
+        width=frame_width,
     )
 
 
@@ -100,4 +121,3 @@ def sequential_transition_split(num_snapshots: int, train_ratio: float) -> tuple
     transition_indices = np.arange(num_snapshots - 1)
     split = max(1, min(len(transition_indices) - 1, int(len(transition_indices) * train_ratio)))
     return transition_indices[:split], transition_indices[split:]
-

@@ -2,25 +2,27 @@
 
 ## Current Best
 
-- Experiment: exp-0021
-- Commit: 25ec4d3-dirty
-- Primary score: 0.020250
-- Notes: Sched-3: dual plateau with deterministic=false runtime check
+- Experiment: exp-0028
+- Commit: 4b4effd-dirty
+- Primary score: 0.000710
+- Notes: Stage 3: portrait residual autoencoder with residual linear dynamics
 
 ## Recent Experiments
 
-- exp-0021: keep, score=0.020250, Sched-3: dual plateau with deterministic=false runtime check
-- exp-0022: discard, score=0.020768, Reg-0: no regularizer under dual plateau deterministic=false
-- exp-0023: discard, score=0.022191, Reg-1: latent L1 only under dual plateau deterministic=false
-- exp-0024: discard, score=0.020955, Reg-2: dynamics L2 only under dual plateau deterministic=false
-- exp-0025: discard, score=0.022281, Reg-4: strong AE+dyn regularizers under dual plateau deterministic=false
+- exp-0027: keep, score=0.001736, Stage 2: portrait baseline AE with residual linear dynamics
+- exp-0028: keep, score=0.000710, Stage 3: portrait residual autoencoder with residual linear dynamics
+- exp-0029: discard, score=0.154054, Stage 4A: residual AE + residual linear dynamics with lower gradient loss weight
+- exp-0030: discard, score=0.000835, Stage 4B: residual AE + residual linear dynamics with shorter train rollout horizon
+- exp-0031: discard, score=0.013512, Stage 4C: portrait residual AE + residual linear dynamics with deterministic=false
 
 ## Avoid Repeating
 
-- Review discarded runs before retrying the same idea.
+- `gradient_loss_weight=0.05` caused rollout collapse in exp-0029.
+- `train_rollout_horizon=12` was slightly worse than the default in exp-0030.
+- `deterministic=False` destabilized the portrait residual stack in exp-0031.
 
 ## Next Priorities
 
-1. Preserve `exp-0021` as the new reference baseline in the report and research charter.
-2. Use the regularizer ablation to justify why the default combined regularizer stays on.
-3. If more optimization is needed, try a scheduler that actually lowers the learning rate before changing architecture.
+1. Preserve `exp-0028` as the reference portrait baseline.
+2. If more optimization is needed, explore only small changes on top of the portrait residual stack.
+3. Keep the old landscape MLP pipeline closed unless it is needed for debugging.

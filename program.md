@@ -18,14 +18,48 @@ minimize the `primary_score` written by `python -m mlfd.run_nonlinear`.
    - `research/state.md`
    - `research/runs/20260310-fluid-rtx3070/index.md`
 4. Keep the linear pipeline stable unless a bug blocks baseline artifact generation.
+5. Keep the portrait layout and portrait comparison figures as the nonlinear default.
+
+## Current Working Baseline
+
+Treat `exp-0028` as the reference model:
+
+- `layout=portrait`
+- `ae_architecture=residual`
+- `dynamics_model=residual_linear`
+- `latent_dim=24`
+- `gradient_loss_weight=0.10`
+- `train_rollout_horizon=16`
+- `train_rollout_stride=8`
+- `validation_rollout_horizon=24`
+- `validation_rollout_stride=4`
+- `deterministic=True`
+
+Reference metrics:
+
+- `primary_score=0.000710`
+- `recon_rmse=0.025058`
+- `rmse_t100=0.026003`
+- `rmse_t150=0.023945`
+
+## Locked Lessons
+
+1. Portrait layout is not optional for the nonlinear mainline. It dramatically improves both interpretability and model quality.
+2. Residual linear dynamics is better than the old MLP-only dynamics on the portrait baseline.
+3. The residual AE is the main improvement over the portrait baseline AE.
+4. `gradient_loss_weight=0.05` is a bad regression. It preserves low AE loss but destroys rollout.
+5. `train_rollout_horizon=12` is slightly worse than `16`.
+6. `deterministic=False` is not safe for the portrait residual architecture, even if it lowers runtime.
 
 ## Suggested Experiment Order
 
-1. Treat `exp-0021` as the working baseline: `latent_dim=24`, `ae_epochs=160`, `dyn_epochs=260`, dual plateau scheduler configured, `latent_l1_weight=1e-4`, `dyn_l2_weight=1e-5`, `deterministic=False`.
-2. Keep the raw `VORTALL` mainline fixed and preserve the new reporting artifacts for 10% test reconstruction, future prediction, latent plots, and regularizer analysis.
-3. Do not spend more time on larger dynamics budgets until a different learning-rate policy actually steps. `dyn280` and `dyn320` are already worse than the current baseline.
-4. Treat the default combined regularizer as the current winner. `latent_l1_weight` alone is weak, `dyn_l2_weight` matters more, and stronger regularization underfits.
-5. Only keep changes that improve `primary_score`, or that preserve the score while reducing VRAM or runtime.
+1. Preserve `exp-0028` as the reference baseline and compare every new run directly against it.
+2. Do not revisit the old landscape MLP stack except for debugging.
+3. If more improvement is needed, try only small follow-ups on top of the portrait residual baseline:
+   - latent width
+   - scheduler that actually steps
+   - minor rollout-weight tuning
+4. Only keep changes that improve `primary_score`, or that preserve the score while clearly lowering VRAM or runtime.
 
 ## Runtime Budget
 

@@ -24,3 +24,9 @@ dbffbf5	0.020998	0.635222	0.773933	0.748281	2.517	388.9	keep	parity rerun: deter
 307911d-dirty	0.022191	0.682136	0.799338	0.797563	1.781	141.0	discard	Reg-1: latent L1 only under dual plateau deterministic=false
 307911d-dirty	0.020955	0.624919	0.766877	0.753601	1.781	142.2	discard	Reg-2: dynamics L2 only under dual plateau deterministic=false
 307911d-dirty	0.022281	0.664550	0.778349	0.823510	1.781	145.1	discard	Reg-4: strong AE+dyn regularizers under dual plateau deterministic=false
+4b4effd-dirty	0.001830	0.060305	0.060771	0.067218	2.517	443.4	keep	Stage 1: portrait layout parity with baseline AE + MLP dynamics
+4b4effd-dirty	0.001736	0.060305	0.053970	0.064757	2.517	455.4	keep	Stage 2: portrait baseline AE with residual linear dynamics
+4b4effd-dirty	0.000710	0.025058	0.026003	0.023945	1.724	303.6	keep	Stage 3: portrait residual autoencoder with residual linear dynamics
+4b4effd-dirty	0.154054	0.021953	2.247940	9.402636	1.724	357.8	discard	Stage 4A: residual AE + residual linear dynamics with lower gradient loss weight
+4b4effd-dirty	0.000835	0.025058	0.028385	0.031248	1.724	284.2	discard	Stage 4B: residual AE + residual linear dynamics with shorter train rollout horizon
+4b4effd-dirty	0.013512	0.022790	0.560361	0.598449	1.417	107.9	discard	Stage 4C: portrait residual AE + residual linear dynamics with deterministic=false
