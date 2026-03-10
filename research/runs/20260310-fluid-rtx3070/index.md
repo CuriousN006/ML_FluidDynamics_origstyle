@@ -2,11 +2,12 @@
 
 ## Timeline
 
-- Pending initialization.
+- exp-0001 | keep | score=0.031904 | baseline smoke validation
+- exp-0002 | discard | score=0.031896 | autoresearch numbering validation
 
 ## Best Model Changes
 
-- None yet.
+- Current best: exp-0001 (0.031904)
 
 ## Open Risks
 

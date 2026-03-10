@@ -5,7 +5,7 @@ import subprocess
 import sys
 
 from .config import AutoresearchConfig, ProjectPaths
-from .experiments import build_record, init_results_file, record_experiment
+from .experiments import build_record, init_results_file, load_records, record_experiment
 from .utils import read_json
 
 
@@ -59,7 +59,7 @@ def main() -> None:
         return
 
     config = AutoresearchConfig(run_tag=paths.run_tag)
-    experiment_id = len(paths.results_tsv.read_text(encoding="utf-8").splitlines())
+    experiment_id = len(load_records(paths)) + 1
     output_tag = f"exp-{experiment_id:04d}"
     command = _default_command(output_tag, args.smoke)
     try:
