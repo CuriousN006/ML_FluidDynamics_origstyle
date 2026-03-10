@@ -2,15 +2,16 @@
 
 ## Current Best
 
-- Experiment: exp-0001
-- Commit: 6b5f1e3
-- Primary score: 0.031904
-- Notes: baseline smoke validation
+- Experiment: exp-0003
+- Commit: 654bbc2
+- Primary score: 0.027961
+- Notes: full baseline nonlinear run
 
 ## Recent Experiments
 
 - exp-0001: keep, score=0.031904, baseline smoke validation
 - exp-0002: discard, score=0.031896, autoresearch numbering validation
+- exp-0003: keep, score=0.027961, full baseline nonlinear run
 
 ## Avoid Repeating
 
