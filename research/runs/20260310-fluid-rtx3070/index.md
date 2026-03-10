@@ -13,11 +13,14 @@
 - exp-0009 | keep | score=0.023994 | raw sweep: latent_dim=24, longer training (ae160 dyn200)
 - exp-0010 | keep | score=0.023211 | raw sweep: latent_dim=24, ae160 dyn260
 - exp-0011 | discard | score=0.029603 | raw sweep: latent_dim=24, ae160 dyn320
+- exp-0012 | crash | score=0.000000 | raw baseline refresh: deterministic seed + rollout-aware dynamics selection
+- exp-0013 | keep | score=0.023163 | raw baseline refresh: deterministic seed + rollout-aware dynamics selection (cpu decode fix)
+- exp-0014 | discard | score=0.024582 | raw sweep: rollout-aware selection with dyn320
 
 ## Best Model Changes
 
-- Current best: exp-0010 (0.023211)
+- Current best: exp-0013 (0.023163)
 
 ## Open Risks
 
-- Continue searching for lower rollout error without increasing complexity too much.
+- Recent crashes or timeouts need follow-up.

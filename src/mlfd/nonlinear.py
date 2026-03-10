@@ -56,6 +56,59 @@ def _regularization_l2(module: nn.Module) -> torch.Tensor:
     return torch.stack(penalties).mean()
 
 
+def _build_loader(
+    dataset: Dataset[torch.Tensor],
+    batch_size: int,
+    shuffle: bool,
+    seed: int,
+) -> DataLoader[torch.Tensor]:
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    return DataLoader(
+        dataset,
+        batch_size=min(batch_size, len(dataset)),
+        shuffle=shuffle,
+        generator=generator,
+    )
+
+
+def _latent_rollout_loss(
+    model: LatentDynamicsMLP,
+    latent_tensor: torch.Tensor,
+    start_index: int,
+    horizon: int,
+) -> torch.Tensor:
+    max_horizon = int(latent_tensor.shape[0] - start_index - 1)
+    effective_horizon = min(horizon, max_horizon)
+    if effective_horizon <= 0:
+        return latent_tensor.new_tensor(0.0)
+    rollout_state = latent_tensor[start_index : start_index + 1]
+    rollout_preds = []
+    for _ in range(effective_horizon):
+        rollout_state = model(rollout_state)
+        rollout_preds.append(rollout_state)
+    rollout_pred = torch.cat(rollout_preds, dim=0)
+    rollout_target = latent_tensor[start_index + 1 : start_index + 1 + effective_horizon]
+    return F.mse_loss(rollout_pred, rollout_target)
+
+
+def _dynamics_validation_terms(
+    model: LatentDynamicsMLP,
+    latent_tensor: torch.Tensor,
+    val_idx: np.ndarray,
+    config: NonlinearConfig,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    val_one_step = F.mse_loss(model(latent_tensor[val_idx]), latent_tensor[val_idx + 1])
+    val_rollout = _latent_rollout_loss(
+        model,
+        latent_tensor,
+        start_index=int(val_idx[0]),
+        horizon=min(config.validation_rollout_horizon, len(val_idx)),
+    )
+    selection_loss = val_one_step + (config.validation_rollout_weight * val_rollout)
+    return val_one_step, val_rollout, selection_loss
+
+
 def _evaluate_autoencoder(
     model: ConvAutoencoder,
     loader: DataLoader[torch.Tensor],
@@ -90,8 +143,8 @@ def _train_autoencoder(
     stats = NormalizationStats(mean=float(train_frames.mean()), std=float(train_frames.std() + 1e-6))
     train_dataset = SnapshotDataset(bundle.frames, train_idx, stats.mean, stats.std)
     test_dataset = SnapshotDataset(bundle.frames, test_idx, stats.mean, stats.std)
-    train_loader = DataLoader(train_dataset, batch_size=min(config.batch_size, len(train_dataset)), shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=min(config.batch_size, len(test_dataset)), shuffle=False)
+    train_loader = _build_loader(train_dataset, config.batch_size, True, config.seed)
+    test_loader = _build_loader(test_dataset, config.batch_size, False, config.seed + 1)
 
     model = ConvAutoencoder((bundle.height, bundle.width), config.latent_dim).to(device)
     optimizer = AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
@@ -174,7 +227,7 @@ def _train_dynamics(
     latent_tensor = torch.from_numpy(latents.astype(np.float32)).to(device)
     model = LatentDynamicsMLP(config.latent_dim, config.dynamics_hidden_dim, config.dynamics_depth).to(device)
     optimizer = AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
-    history = {"train_loss": [], "val_loss": []}
+    history = {"train_loss": [], "val_loss": [], "val_one_step_loss": [], "val_rollout_loss": []}
     best_state = copy.deepcopy(model.state_dict())
     best_loss = float("inf")
     patience = 0
@@ -187,25 +240,23 @@ def _train_dynamics(
         loss = F.mse_loss(prediction, target) + (config.dyn_l2_weight * _regularization_l2(model))
         rollout_horizon = min(5, len(train_idx))
         if rollout_horizon > 1:
-            rollout_state = latent_tensor[0:1]
-            rollout_preds = []
-            for _ in range(rollout_horizon):
-                rollout_state = model(rollout_state)
-                rollout_preds.append(rollout_state)
-            rollout_pred = torch.cat(rollout_preds, dim=0)
-            rollout_target = latent_tensor[1 : 1 + rollout_horizon]
-            loss = loss + (config.rollout_loss_weight * F.mse_loss(rollout_pred, rollout_target))
+            loss = loss + (
+                config.rollout_loss_weight
+                * _latent_rollout_loss(model, latent_tensor, start_index=int(train_idx[0]), horizon=rollout_horizon)
+            )
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
 
         model.eval()
         with torch.no_grad():
-            val_loss = F.mse_loss(model(latent_tensor[val_idx]), latent_tensor[val_idx + 1]).item()
+            val_one_step, val_rollout, val_loss = _dynamics_validation_terms(model, latent_tensor, val_idx, config)
         history["train_loss"].append(loss.item())
-        history["val_loss"].append(val_loss)
-        if val_loss < best_loss:
-            best_loss = val_loss
+        history["val_loss"].append(val_loss.item())
+        history["val_one_step_loss"].append(val_one_step.item())
+        history["val_rollout_loss"].append(val_rollout.item())
+        if val_loss.item() < best_loss:
+            best_loss = val_loss.item()
             best_state = copy.deepcopy(model.state_dict())
             patience = 0
         else:
@@ -225,8 +276,13 @@ def _train_dynamics(
             rollout_latents.append(current.squeeze(0).cpu().numpy())
     rollout_latents_np = np.stack(rollout_latents)
 
+    autoencoder = autoencoder.to("cpu")
+    model = model.to("cpu")
+    if device.type == "cuda":
+        del latent_tensor
+        torch.cuda.empty_cache()
     with torch.no_grad():
-        recon = autoencoder.decode(torch.from_numpy(rollout_latents_np.astype(np.float32)).to(device)).cpu().numpy()[:, 0]
+        recon = autoencoder.decode(torch.from_numpy(rollout_latents_np.astype(np.float32))).numpy()[:, 0]
     predicted_frames = _denormalize(recon, stats).astype(np.float32)
 
     compare_metrics: dict[str, dict[str, float]] = {}
@@ -268,7 +324,7 @@ def run_nonlinear_pipeline(
     paths.ensure_directories()
     output_dir = paths.nonlinear_dir / output_tag
     output_dir.mkdir(parents=True, exist_ok=True)
-    set_seed(config.seed)
+    set_seed(config.seed, deterministic=config.deterministic)
     device = detect_device(config.device)
     bundle = load_field_bundle(config.field_name, paths)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import subprocess
 from datetime import datetime, timezone
@@ -23,29 +24,49 @@ def utc_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def set_seed(seed: int) -> None:
+def set_seed(seed: int, deterministic: bool = True) -> None:
     random.seed(seed)
     np.random.seed(seed)
     try:
         import torch
 
+        if deterministic:
+            os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
+        if deterministic:
+            if hasattr(torch.backends, "cudnn"):
+                torch.backends.cudnn.benchmark = False
+                torch.backends.cudnn.deterministic = True
+            try:
+                torch.use_deterministic_algorithms(True, warn_only=True)
+            except TypeError:
+                torch.use_deterministic_algorithms(True)
     except ImportError:
         pass
 
 
 def short_git_commit(root: Path) -> str:
     try:
-        result = subprocess.run(
+        commit_result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=root,
             check=True,
             capture_output=True,
             text=True,
         )
-        return result.stdout.strip()
+        status_result = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        commit = commit_result.stdout.strip()
+        if status_result.stdout.strip():
+            return f"{commit}-dirty"
+        return commit
     except (FileNotFoundError, subprocess.CalledProcessError):
         return f"nogit-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 

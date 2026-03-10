@@ -44,4 +44,5 @@ py -3.12 -m venv .venv
 - The git workflow uses a dedicated research branch. This bootstrap uses
   `codex/autoresearch/20260310-fluid-rtx3070` to stay compatible with the local branch prefix policy.
 - Existing PNG dumps are treated as derived visualizations, not primary training data.
-
+- The current raw nonlinear baseline is centered on `latent_dim=24`,
+  `ae_epochs=160`, and `dyn_epochs=260`.

@@ -114,8 +114,8 @@ class NonlinearConfig:
     field_name: str = "VORTALL"
     seed: int = 42
     latent_dim: int = 24
-    ae_epochs: int = 120
-    dyn_epochs: int = 150
+    ae_epochs: int = 160
+    dyn_epochs: int = 260
     batch_size: int = 16
     learning_rate: float = 1e-3
     weight_decay: float = 1e-5
@@ -124,12 +124,15 @@ class NonlinearConfig:
     rollout_loss_weight: float = 0.15
     dynamics_hidden_dim: int = 64
     dynamics_depth: int = 2
+    validation_rollout_weight: float = 0.25
+    validation_rollout_horizon: int = 12
     ae_train_ratio: float = 0.9
     dyn_train_ratio: float = 0.8
     early_stopping_patience: int = 20
     compare_steps: tuple[int, ...] = (100, 150)
     num_preview_images: int = 4
     device: str = "auto"
+    deterministic: bool = True
 
     def smoke(self) -> "NonlinearConfig":
         return replace(

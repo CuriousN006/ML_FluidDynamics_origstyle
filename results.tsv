@@ -10,3 +10,6 @@ commit	primary_score	recon_rmse	rmse_t100	rmse_t150	memory_gb	wall_seconds	statu
 3cf7f7b	0.023994	0.709584	0.832694	0.892534	9.669	138.5	keep	raw sweep: latent_dim=24, longer training (ae160 dyn200)
 3cf7f7b	0.023211	0.714502	0.844911	0.828501	9.669	139.0	keep	raw sweep: latent_dim=24, ae160 dyn260
 3cf7f7b	0.029603	0.893663	1.060580	1.073967	9.669	139.0	discard	raw sweep: latent_dim=24, ae160 dyn320
+77a8a03	0.000000	0.000000	0.000000	0.000000	0.000	720.0	crash	raw baseline refresh: deterministic seed + rollout-aware dynamics selection
+77a8a03	0.023163	0.628368	0.807242	0.882237	2.517	379.4	keep	raw baseline refresh: deterministic seed + rollout-aware dynamics selection (cpu decode fix)
+77a8a03	0.024582	0.628861	0.819961	0.973522	2.517	373.0	discard	raw sweep: rollout-aware selection with dyn320
