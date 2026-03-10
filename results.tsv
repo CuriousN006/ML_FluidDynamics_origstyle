@@ -7,3 +7,6 @@ commit	primary_score	recon_rmse	rmse_t100	rmse_t150	memory_gb	wall_seconds	statu
 19b9a93	0.027935	0.753554	0.953043	1.078014	9.669	109.5	discard	raw sweep: latent_dim=24, dynamics_depth=3
 19b9a93	0.024609	0.676526	0.859425	0.932673	9.669	108.8	discard	raw sweep: latent_dim=32
 70d586a	0.028337	0.923453	1.023592	0.995766	9.669	103.7	discard	raw sweep: baseline latent_dim=24, dynamics_hidden_dim=96
+3cf7f7b	0.023994	0.709584	0.832694	0.892534	9.669	138.5	keep	raw sweep: latent_dim=24, longer training (ae160 dyn200)
+3cf7f7b	0.023211	0.714502	0.844911	0.828501	9.669	139.0	keep	raw sweep: latent_dim=24, ae160 dyn260
+3cf7f7b	0.029603	0.893663	1.060580	1.073967	9.669	139.0	discard	raw sweep: latent_dim=24, ae160 dyn320
