@@ -21,11 +21,11 @@ minimize the `primary_score` written by `python -m mlfd.run_nonlinear`.
 
 ## Suggested Experiment Order
 
-1. Treat `exp-0015` as the working baseline: `latent_dim=24`, `ae_epochs=160`, `dyn_epochs=260`, rollout-aware dynamics validation, deterministic seeding, CPU rollout decode.
-2. Prefer optimizer and training-policy changes over more depth/width. The recent sweep showed that extra dynamics capacity hurt more often than it helped.
-3. Search near the current dynamics budget instead of pushing far past it. `dyn320` no longer fully collapses under rollout-aware selection, but it still loses to `dyn260`.
-4. Explore encoder/decoder refinements only after the dynamics policy stops yielding gains.
-5. Only keep changes that improve `primary_score`, or that preserve the score while reducing VRAM or complexity.
+1. Treat `exp-0021` as the working baseline: `latent_dim=24`, `ae_epochs=160`, `dyn_epochs=260`, dual plateau scheduler configured, `latent_l1_weight=1e-4`, `dyn_l2_weight=1e-5`, `deterministic=False`.
+2. Keep the raw `VORTALL` mainline fixed and preserve the new reporting artifacts for 10% test reconstruction, future prediction, latent plots, and regularizer analysis.
+3. Do not spend more time on larger dynamics budgets until a different learning-rate policy actually steps. `dyn280` and `dyn320` are already worse than the current baseline.
+4. Treat the default combined regularizer as the current winner. `latent_l1_weight` alone is weak, `dyn_l2_weight` matters more, and stronger regularization underfits.
+5. Only keep changes that improve `primary_score`, or that preserve the score while reducing VRAM or runtime.
 
 ## Runtime Budget
 

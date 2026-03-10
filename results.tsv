@@ -20,3 +20,7 @@ dbffbf5	0.020998	0.635222	0.773933	0.748281	2.517	388.9	keep	parity rerun: deter
 25ec4d3	0.020998	0.635222	0.773933	0.748281	2.517	382.3	discard	Sched-1: dyn-only plateau scheduler
 25ec4d3-dirty	0.020998	0.635222	0.773933	0.748281	2.517	381.2	discard	Sched-2: dual plateau scheduler
 25ec4d3-dirty	0.020250	0.615190	0.730262	0.730221	1.781	142.7	keep	Sched-3: dual plateau with deterministic=false runtime check
+307911d	0.020768	0.613836	0.760325	0.748900	1.781	143.2	discard	Reg-0: no regularizer under dual plateau deterministic=false
+307911d-dirty	0.022191	0.682136	0.799338	0.797563	1.781	141.0	discard	Reg-1: latent L1 only under dual plateau deterministic=false
+307911d-dirty	0.020955	0.624919	0.766877	0.753601	1.781	142.2	discard	Reg-2: dynamics L2 only under dual plateau deterministic=false
+307911d-dirty	0.022281	0.664550	0.778349	0.823510	1.781	145.1	discard	Reg-4: strong AE+dyn regularizers under dual plateau deterministic=false

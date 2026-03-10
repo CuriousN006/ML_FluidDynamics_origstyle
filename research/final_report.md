@@ -54,22 +54,71 @@ search on `VORTALL`.
   `ae_epochs=160`, `dyn_epochs=260` reached `primary_score=0.023211`.
 - `exp-0013` validated rollout-aware selection and the CPU decode fix:
   `primary_score=0.023163`, `peak_memory_gb=2.517`.
-- `exp-0015` is the current best run:
-  `primary_score=0.021425`, `recon_rmse=0.634319`,
-  `rmse_t100=0.778642`, `rmse_t150=0.775613`,
-  `peak_memory_gb=2.517`.
+- `exp-0018` restored parity after replacing non-deterministic encoder pooling:
+  `primary_score=0.020998`.
+- `exp-0021` is the current best run:
+  `primary_score=0.020250`, `recon_rmse=0.615190`, `recon_mse=0.378470`,
+  `rmse_t100=0.730262`, `rmse_t150=0.730221`,
+  `peak_memory_gb=1.781`.
 
 The current best nonlinear configuration is therefore:
 
 - `latent_dim=24`
 - `ae_epochs=160`
 - `dyn_epochs=260`
+- `ae_scheduler=plateau`
+- `dyn_scheduler=plateau`
 - `rollout_loss_weight=0.15`
 - `dynamics_depth=2`
-- deterministic seeding enabled
+- `latent_l1_weight=1e-4`
+- `dyn_l2_weight=1e-5`
+- `deterministic=False`
 - rollout-aware dynamics validation enabled
 
-The best metrics file is `output/nonlinear/exp-0015/metrics.json`.
+The best metrics file is `output/nonlinear/exp-0021/metrics.json`.
+
+## 10% Test Reconstruction
+
+The AE evaluation uses the fixed random `90/10` split produced by seed `42`.
+The reconstruction comparison panels come from the held-out test set and are
+saved in `output/nonlinear/exp-0021/ae_reconstruction_preview_*.png`.
+
+For the current best run `exp-0021`:
+
+- test reconstruction `MSE = 0.378470`
+- test reconstruction `RMSE = 0.615190`
+- test reconstruction `NRMSE = 0.017552`
+
+These numbers satisfy the project requirement to compare reconstructed snapshots
+from the AE against the original snapshots on the 10% test dataset.
+
+## Future Prediction At t=100 And t=150
+
+The future rollout panels are saved in:
+
+- `output/nonlinear/exp-0021/rollout_step_100.png`
+- `output/nonlinear/exp-0021/rollout_step_150.png`
+
+For `exp-0021`:
+
+- `t=100`: `MSE = 0.533282`, `RMSE = 0.730262`, `NRMSE = 0.020698`
+- `t=150`: `MSE = 0.533222`, `RMSE = 0.730221`, `NRMSE = 0.020285`
+
+The current best nonlinear model therefore improves both project forecast
+targets relative to the older raw baselines.
+
+## Latent Dynamics Interpretation
+
+The nonlinear pipeline now saves two explicit latent-dynamics views for each run:
+
+- `latent_pca_trajectory.png`
+- `latent_time_series.png`
+
+For `exp-0021`, the PCA trajectory plot shows a smooth time-ordered path rather
+than a noisy scatter, which is consistent with a low-dimensional oscillatory
+wake cycle. The first three latent coordinates also evolve smoothly over time
+instead of jumping abruptly, which supports the interpretation that the latent
+state is tracking a structured dynamical system rather than memorizing frames.
 
 ## Agentic Research Timeline
 
@@ -106,26 +155,56 @@ The experiment ledger in `results.tsv` and the append-only notes in
      again to `0.021425`.
    - `exp-0016` (`dyn280`) lost to `exp-0015`, which suggests the current
      optimum sits very near `dyn260`.
+7. The next phase targeted explicit project reporting requirements:
+   - `exp-0017` showed that parity was still unstable because the encoder used
+     `AdaptiveAvgPool2d`, whose CUDA backward path was not truly deterministic.
+   - `exp-0018` replaced that encoder pooling path with a deterministic-friendly
+     resize and immediately improved the baseline to `0.020998`.
+   - `exp-0019` and `exp-0020` turned on plateau schedulers, but the learning
+     rate never actually stepped, so the score stayed tied with `exp-0018`.
+   - `exp-0021` kept the same training policy but set `deterministic=False`,
+     which reduced runtime from roughly `389s` to `143s` and improved the score
+     again to `0.020250`.
+8. Regularizer ablation then isolated the role of `latent_l1_weight` and
+   `dyn_l2_weight` under the locked Stage B training policy. The summary is in
+   `research/regularizer_ablation.md`.
 
 ## Final Model Selection
 
-`exp-0015` is the final best model because it improves the fixed objective while
+`exp-0021` is the final best model because it improves the fixed objective while
 also materially lowering peak memory. The evidence is consistent across the
 ledger and experiment notes:
 
-- `results.tsv` marks `exp-0015` as a keep with the lowest current score,
-  `0.021425`.
-- `research/experiments/exp-0015.md` records the exact hypothesis and run
+- `results.tsv` marks `exp-0021` as a keep with the lowest current score,
+  `0.020250`.
+- `research/experiments/exp-0021.md` records the exact hypothesis and run
   context.
-- `output/nonlinear/exp-0015/metrics.json` confirms the strongest overall
+- `output/nonlinear/exp-0021/metrics.json` confirms the strongest overall
   combination of reconstruction quality, rollout quality, and memory footprint.
 
-Compared with the earlier longer-training best `exp-0010`, `exp-0015` improves
+Compared with the earlier longer-training best `exp-0010`, `exp-0021` improves
 both long-horizon rollout terms while staying in the reduced-memory regime:
 
-- `rmse_t100`: `0.844911 -> 0.778642`
-- `rmse_t150`: `0.828501 -> 0.775613`
-- `peak_memory_gb`: `9.669 -> 2.517`
+- `rmse_t100`: `0.844911 -> 0.730262`
+- `rmse_t150`: `0.828501 -> 0.730221`
+- `peak_memory_gb`: `9.669 -> 1.781`
+
+## Effects Of Regularizer
+
+The dedicated regularizer ablation confirms that regularization matters, but not
+all regularizers help equally.
+
+- `Reg-0` (no regularizer) is competitive in reconstruction but loses in rollout.
+- `Reg-1` (AE `latent_l1_weight` only) is clearly worse, which suggests the L1
+  term by itself is not enough and may over-constrain the latent code.
+- `Reg-2` (dynamics `dyn_l2_weight` only) stays close to the no-regularizer run,
+  so the dynamics-side regularizer appears more useful than the AE-side one.
+- `Reg-3` (default pair) is the best overall setting and gives the strongest
+  combined rollout result.
+- `Reg-4` (stronger pair) underfits, hurting both reconstruction and rollout.
+
+In short, the default combined regularization improves long-horizon stability,
+while overly strong regularization hurts performance.
 
 ## Limitations And Next Steps
 
@@ -134,12 +213,12 @@ errors, so there is room to improve the learned latent dynamics.
 
 Highest-value next steps:
 
-- Add a light learning-rate scheduler before changing architecture again.
-- Keep the rollout-aware validation selector, but test whether full deterministic
-  algorithms are worth the runtime cost or whether seeded data loading alone is
-  enough.
+- Keep `deterministic=False` as the current best runtime/performance setting and
+  only revisit strict determinism if exact replay becomes more important than score.
 - Treat `dyn_epochs=260` as the current sweet spot. `dyn280` and `dyn320`
   already suggest that simply training longer is no longer the right lever.
-- Revisit AE-side refinements only after the dynamics training policy stabilizes.
+- If scheduler exploration resumes, make it more aggressive. In the current
+  plateau setup the learning rate never stepped.
+- Revisit AE-side refinements only after the training-policy search is exhausted.
 - Leave image-only and hybrid branches for a later phase; raw `VORTALL` remains
   the canonical mainline.

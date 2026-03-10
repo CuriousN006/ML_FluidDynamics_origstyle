@@ -9,11 +9,11 @@
 
 ## Recent Experiments
 
-- exp-0017: discard, score=0.024719, parity run: exp-0015 baseline with expanded metrics
-- exp-0018: keep, score=0.020998, parity rerun: deterministic resize baseline
-- exp-0019: discard, score=0.020998, Sched-1: dyn-only plateau scheduler
-- exp-0020: discard, score=0.020998, Sched-2: dual plateau scheduler
 - exp-0021: keep, score=0.020250, Sched-3: dual plateau with deterministic=false runtime check
+- exp-0022: discard, score=0.020768, Reg-0: no regularizer under dual plateau deterministic=false
+- exp-0023: discard, score=0.022191, Reg-1: latent L1 only under dual plateau deterministic=false
+- exp-0024: discard, score=0.020955, Reg-2: dynamics L2 only under dual plateau deterministic=false
+- exp-0025: discard, score=0.022281, Reg-4: strong AE+dyn regularizers under dual plateau deterministic=false
 
 ## Avoid Repeating
 
@@ -21,6 +21,6 @@
 
 ## Next Priorities
 
-1. Inspect the latest discarded run and extract the lesson.
-2. Try the next highest-value architecture or regularization change.
-3. Update the long-form report after a meaningful improvement.
+1. Preserve `exp-0021` as the new reference baseline in the report and research charter.
+2. Use the regularizer ablation to justify why the default combined regularizer stays on.
+3. If more optimization is needed, try a scheduler that actually lowers the learning rate before changing architecture.

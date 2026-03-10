@@ -23,6 +23,10 @@
 - exp-0019 | discard | score=0.020998 | Sched-1: dyn-only plateau scheduler
 - exp-0020 | discard | score=0.020998 | Sched-2: dual plateau scheduler
 - exp-0021 | keep | score=0.020250 | Sched-3: dual plateau with deterministic=false runtime check
+- exp-0022 | discard | score=0.020768 | Reg-0: no regularizer under dual plateau deterministic=false
+- exp-0023 | discard | score=0.022191 | Reg-1: latent L1 only under dual plateau deterministic=false
+- exp-0024 | discard | score=0.020955 | Reg-2: dynamics L2 only under dual plateau deterministic=false
+- exp-0025 | discard | score=0.022281 | Reg-4: strong AE+dyn regularizers under dual plateau deterministic=false
 
 ## Best Model Changes
 
