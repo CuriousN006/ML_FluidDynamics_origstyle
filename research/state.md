@@ -2,18 +2,18 @@
 
 ## Current Best
 
-- Experiment: exp-0018
-- Commit: dbffbf5
-- Primary score: 0.020998
-- Notes: parity rerun: deterministic resize baseline
+- Experiment: exp-0021
+- Commit: 25ec4d3-dirty
+- Primary score: 0.020250
+- Notes: Sched-3: dual plateau with deterministic=false runtime check
 
 ## Recent Experiments
 
-- exp-0014: discard, score=0.024582, raw sweep: rollout-aware selection with dyn320
-- exp-0015: keep, score=0.021425, clean baseline replay: rollout-aware deterministic raw baseline
-- exp-0016: discard, score=0.022834, raw sweep: clean baseline with dyn280
 - exp-0017: discard, score=0.024719, parity run: exp-0015 baseline with expanded metrics
 - exp-0018: keep, score=0.020998, parity rerun: deterministic resize baseline
+- exp-0019: discard, score=0.020998, Sched-1: dyn-only plateau scheduler
+- exp-0020: discard, score=0.020998, Sched-2: dual plateau scheduler
+- exp-0021: keep, score=0.020250, Sched-3: dual plateau with deterministic=false runtime check
 
 ## Avoid Repeating
 

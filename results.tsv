@@ -17,3 +17,6 @@ commit	primary_score	recon_rmse	rmse_t100	rmse_t150	memory_gb	wall_seconds	statu
 6022104-dirty	0.022834	0.669273	0.818817	0.835962	2.517	375.8	discard	raw sweep: clean baseline with dyn280
 4327379	0.024719	0.736773	0.845216	0.924758	2.517	381.9	discard	parity run: exp-0015 baseline with expanded metrics
 dbffbf5	0.020998	0.635222	0.773933	0.748281	2.517	388.9	keep	parity rerun: deterministic resize baseline
+25ec4d3	0.020998	0.635222	0.773933	0.748281	2.517	382.3	discard	Sched-1: dyn-only plateau scheduler
+25ec4d3-dirty	0.020998	0.635222	0.773933	0.748281	2.517	381.2	discard	Sched-2: dual plateau scheduler
+25ec4d3-dirty	0.020250	0.615190	0.730262	0.730221	1.781	142.7	keep	Sched-3: dual plateau with deterministic=false runtime check

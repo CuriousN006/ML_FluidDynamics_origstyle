@@ -20,10 +20,13 @@
 - exp-0016 | discard | score=0.022834 | raw sweep: clean baseline with dyn280
 - exp-0017 | discard | score=0.024719 | parity run: exp-0015 baseline with expanded metrics
 - exp-0018 | keep | score=0.020998 | parity rerun: deterministic resize baseline
+- exp-0019 | discard | score=0.020998 | Sched-1: dyn-only plateau scheduler
+- exp-0020 | discard | score=0.020998 | Sched-2: dual plateau scheduler
+- exp-0021 | keep | score=0.020250 | Sched-3: dual plateau with deterministic=false runtime check
 
 ## Best Model Changes
 
-- Current best: exp-0018 (0.020998)
+- Current best: exp-0021 (0.020250)
 
 ## Open Risks
 
