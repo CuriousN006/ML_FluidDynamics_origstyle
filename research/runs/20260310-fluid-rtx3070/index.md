@@ -19,10 +19,11 @@
 - exp-0015 | keep | score=0.021425 | clean baseline replay: rollout-aware deterministic raw baseline
 - exp-0016 | discard | score=0.022834 | raw sweep: clean baseline with dyn280
 - exp-0017 | discard | score=0.024719 | parity run: exp-0015 baseline with expanded metrics
+- exp-0018 | keep | score=0.020998 | parity rerun: deterministic resize baseline
 
 ## Best Model Changes
 
-- Current best: exp-0015 (0.021425)
+- Current best: exp-0018 (0.020998)
 
 ## Open Risks
 
