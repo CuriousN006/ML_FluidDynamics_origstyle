@@ -2,3 +2,8 @@ commit	primary_score	recon_rmse	rmse_t100	rmse_t150	memory_gb	wall_seconds	statu
 6b5f1e3	0.031904	1.106713	1.111277	1.119066	9.669	2.2	keep	baseline smoke validation
 6b5f1e3	0.031896	1.106068	1.110748	1.119044	9.669	2.2	discard	autoresearch numbering validation
 654bbc2	0.027961	0.724065	0.922945	1.109648	9.669	103.4	keep	full baseline nonlinear run
+19b9a93	0.024610	0.695563	0.863769	0.922491	9.669	104.8	keep	raw sweep: latent_dim=24
+19b9a93	0.026242	0.765166	0.934132	0.966413	9.669	108.3	discard	raw sweep: latent_dim=24, rollout_loss_weight=0.20
+19b9a93	0.027935	0.753554	0.953043	1.078014	9.669	109.5	discard	raw sweep: latent_dim=24, dynamics_depth=3
+19b9a93	0.024609	0.676526	0.859425	0.932673	9.669	108.8	discard	raw sweep: latent_dim=32
+70d586a	0.028337	0.923453	1.023592	0.995766	9.669	103.7	discard	raw sweep: baseline latent_dim=24, dynamics_hidden_dim=96

@@ -5,10 +5,15 @@
 - exp-0001 | keep | score=0.031904 | baseline smoke validation
 - exp-0002 | discard | score=0.031896 | autoresearch numbering validation
 - exp-0003 | keep | score=0.027961 | full baseline nonlinear run
+- exp-0004 | keep | score=0.024610 | raw sweep: latent_dim=24
+- exp-0005 | discard | score=0.026242 | raw sweep: latent_dim=24, rollout_loss_weight=0.20
+- exp-0006 | discard | score=0.027935 | raw sweep: latent_dim=24, dynamics_depth=3
+- exp-0007 | discard | score=0.024609 | raw sweep: latent_dim=32
+- exp-0008 | discard | score=0.028337 | raw sweep: baseline latent_dim=24, dynamics_hidden_dim=96
 
 ## Best Model Changes
 
-- Current best: exp-0003 (0.027961)
+- Current best: exp-0004 (0.024610)
 
 ## Open Risks
 
