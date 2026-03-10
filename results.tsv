@@ -13,3 +13,5 @@ commit	primary_score	recon_rmse	rmse_t100	rmse_t150	memory_gb	wall_seconds	statu
 77a8a03	0.000000	0.000000	0.000000	0.000000	0.000	720.0	crash	raw baseline refresh: deterministic seed + rollout-aware dynamics selection
 77a8a03	0.023163	0.628368	0.807242	0.882237	2.517	379.4	keep	raw baseline refresh: deterministic seed + rollout-aware dynamics selection (cpu decode fix)
 77a8a03	0.024582	0.628861	0.819961	0.973522	2.517	373.0	discard	raw sweep: rollout-aware selection with dyn320
+6022104	0.021425	0.634319	0.778642	0.775613	2.517	375.0	keep	clean baseline replay: rollout-aware deterministic raw baseline
+6022104-dirty	0.022834	0.669273	0.818817	0.835962	2.517	375.8	discard	raw sweep: clean baseline with dyn280

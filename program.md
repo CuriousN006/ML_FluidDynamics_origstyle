@@ -21,7 +21,7 @@ minimize the `primary_score` written by `python -m mlfd.run_nonlinear`.
 
 ## Suggested Experiment Order
 
-1. Treat `exp-0013` as the working baseline: `latent_dim=24`, `ae_epochs=160`, `dyn_epochs=260`, rollout-aware dynamics validation, deterministic seeding.
+1. Treat `exp-0015` as the working baseline: `latent_dim=24`, `ae_epochs=160`, `dyn_epochs=260`, rollout-aware dynamics validation, deterministic seeding, CPU rollout decode.
 2. Prefer optimizer and training-policy changes over more depth/width. The recent sweep showed that extra dynamics capacity hurt more often than it helped.
 3. Search near the current dynamics budget instead of pushing far past it. `dyn320` no longer fully collapses under rollout-aware selection, but it still loses to `dyn260`.
 4. Explore encoder/decoder refinements only after the dynamics policy stops yielding gains.

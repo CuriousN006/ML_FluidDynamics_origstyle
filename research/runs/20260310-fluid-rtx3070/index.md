@@ -16,10 +16,12 @@
 - exp-0012 | crash | score=0.000000 | raw baseline refresh: deterministic seed + rollout-aware dynamics selection
 - exp-0013 | keep | score=0.023163 | raw baseline refresh: deterministic seed + rollout-aware dynamics selection (cpu decode fix)
 - exp-0014 | discard | score=0.024582 | raw sweep: rollout-aware selection with dyn320
+- exp-0015 | keep | score=0.021425 | clean baseline replay: rollout-aware deterministic raw baseline
+- exp-0016 | discard | score=0.022834 | raw sweep: clean baseline with dyn280
 
 ## Best Model Changes
 
-- Current best: exp-0013 (0.023163)
+- Current best: exp-0015 (0.021425)
 
 ## Open Risks
 

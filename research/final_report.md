@@ -52,9 +52,11 @@ search on `VORTALL`.
   `primary_score=0.024610`.
 - `exp-0010` showed that longer training is more valuable than deeper dynamics:
   `ae_epochs=160`, `dyn_epochs=260` reached `primary_score=0.023211`.
-- `exp-0013` is the current best run:
-  `primary_score=0.023163`, `recon_rmse=0.628368`,
-  `rmse_t100=0.807242`, `rmse_t150=0.882237`,
+- `exp-0013` validated rollout-aware selection and the CPU decode fix:
+  `primary_score=0.023163`, `peak_memory_gb=2.517`.
+- `exp-0015` is the current best run:
+  `primary_score=0.021425`, `recon_rmse=0.634319`,
+  `rmse_t100=0.778642`, `rmse_t150=0.775613`,
   `peak_memory_gb=2.517`.
 
 The current best nonlinear configuration is therefore:
@@ -67,7 +69,7 @@ The current best nonlinear configuration is therefore:
 - deterministic seeding enabled
 - rollout-aware dynamics validation enabled
 
-The best metrics file is `output/nonlinear/exp-0013/metrics.json`.
+The best metrics file is `output/nonlinear/exp-0015/metrics.json`.
 
 ## Agentic Research Timeline
 
@@ -99,24 +101,31 @@ The experiment ledger in `results.tsv` and the append-only notes in
    - `exp-0013` keep, which became the new best run.
    - `exp-0014` discard, which revisited `dyn320` and showed that rollout-aware
      selection prevents full collapse but still does not beat the `dyn260` regime.
+6. A clean replay and local budget check then refined the conclusion:
+   - `exp-0015` cleanly replayed the committed baseline and improved the score
+     again to `0.021425`.
+   - `exp-0016` (`dyn280`) lost to `exp-0015`, which suggests the current
+     optimum sits very near `dyn260`.
 
 ## Final Model Selection
 
-`exp-0013` is the final best model because it improves the fixed objective while
+`exp-0015` is the final best model because it improves the fixed objective while
 also materially lowering peak memory. The evidence is consistent across the
 ledger and experiment notes:
 
-- `results.tsv` marks `exp-0013` as a keep with the lowest current score,
-  `0.023163`.
-- `research/experiments/exp-0013.md` records the exact hypothesis and run
+- `results.tsv` marks `exp-0015` as a keep with the lowest current score,
+  `0.021425`.
+- `research/experiments/exp-0015.md` records the exact hypothesis and run
   context.
-- `output/nonlinear/exp-0013/metrics.json` confirms the strongest overall
+- `output/nonlinear/exp-0015/metrics.json` confirms the strongest overall
   combination of reconstruction quality, rollout quality, and memory footprint.
 
-Compared with the prior best `exp-0010`, `exp-0013` trades a slightly worse
-`t=150` RMSE for a stronger reconstruction term, a better `t=100` RMSE, and a
-large GPU-memory reduction (`9.669 GB -> 2.517 GB`). Under the current keep
-policy, that combination is the best overall checkpoint.
+Compared with the earlier longer-training best `exp-0010`, `exp-0015` improves
+both long-horizon rollout terms while staying in the reduced-memory regime:
+
+- `rmse_t100`: `0.844911 -> 0.778642`
+- `rmse_t150`: `0.828501 -> 0.775613`
+- `peak_memory_gb`: `9.669 -> 2.517`
 
 ## Limitations And Next Steps
 
@@ -129,8 +138,8 @@ Highest-value next steps:
 - Keep the rollout-aware validation selector, but test whether full deterministic
   algorithms are worth the runtime cost or whether seeded data loading alone is
   enough.
-- Explore a narrow band around the current dynamics budget (`dyn_epochs` near
-  `220-280`) instead of pushing to `320+`.
+- Treat `dyn_epochs=260` as the current sweet spot. `dyn280` and `dyn320`
+  already suggest that simply training longer is no longer the right lever.
 - Revisit AE-side refinements only after the dynamics training policy stabilizes.
 - Leave image-only and hybrid branches for a later phase; raw `VORTALL` remains
   the canonical mainline.
