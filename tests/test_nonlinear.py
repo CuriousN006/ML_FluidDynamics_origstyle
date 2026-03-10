@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 from mlfd.config import NonlinearConfig
-from mlfd.nonlinear import _dynamics_validation_terms, _latent_rollout_loss, compute_ae_score
+from mlfd.nonlinear import _dynamics_validation_terms, _gaussian_blur, _latent_rollout_loss, compute_ae_score
 
 
 class IdentityDynamics(nn.Module):
@@ -37,3 +37,9 @@ def test_dynamics_validation_terms_include_rollout_component() -> None:
 def test_compute_ae_score_weights_reconstruction_and_floor_terms() -> None:
     score = compute_ae_score(0.1, 0.2, 0.3)
     assert score == 0.175
+
+
+def test_gaussian_blur_preserves_shape() -> None:
+    field = torch.randn(2, 1, 32, 16)
+    blurred = _gaussian_blur(field, kernel_size=9, sigma=2.0)
+    assert blurred.shape == field.shape

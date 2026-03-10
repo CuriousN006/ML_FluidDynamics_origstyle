@@ -28,6 +28,11 @@ def apply_cli_overrides(config: NonlinearConfig, args: Namespace) -> NonlinearCo
         "ae_architecture": args.ae_architecture,
         "ae_width_mult": args.ae_width_mult,
         "coordconv": args.coordconv,
+        "coarse_loss_weight": args.coarse_loss_weight,
+        "coarse_blur_kernel": args.coarse_blur_kernel,
+        "coarse_blur_sigma": args.coarse_blur_sigma,
+        "refine_blocks": args.refine_blocks,
+        "refine_channels_mult": args.refine_channels_mult,
         "dynamics_model": args.dynamics_model,
         "ae_epochs": args.ae_epochs,
         "dyn_epochs": args.dyn_epochs,
@@ -70,7 +75,7 @@ def main() -> None:
     parser.add_argument("--layout", choices=["landscape", "portrait"], default=None, help="Override frame layout.")
     parser.add_argument(
         "--ae-architecture",
-        choices=["baseline", "residual", "residual_multiscale"],
+        choices=["baseline", "residual", "residual_refine", "residual_multiscale"],
         default=None,
         help="Override the autoencoder architecture.",
     )
@@ -80,6 +85,16 @@ def main() -> None:
         type=_parse_bool,
         default=None,
         help="Override encoder CoordConv positional channels. Use true or false.",
+    )
+    parser.add_argument("--coarse-loss-weight", type=float, default=None, help="Override coarse-to-fine auxiliary loss weight.")
+    parser.add_argument("--coarse-blur-kernel", type=int, default=None, help="Override coarse target Gaussian kernel size.")
+    parser.add_argument("--coarse-blur-sigma", type=float, default=None, help="Override coarse target Gaussian sigma.")
+    parser.add_argument("--refine-blocks", type=int, default=None, help="Override the number of refinement residual blocks.")
+    parser.add_argument(
+        "--refine-channels-mult",
+        type=float,
+        default=None,
+        help="Override refinement head channel multiplier.",
     )
     parser.add_argument(
         "--dynamics-model",

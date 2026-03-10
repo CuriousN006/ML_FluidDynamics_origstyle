@@ -98,11 +98,39 @@ def _fft_magnitude_l1(prediction: torch.Tensor, target: torch.Tensor) -> torch.T
     return F.l1_loss(torch.abs(pred_fft), torch.abs(target_fft))
 
 
+def _gaussian_kernel(kernel_size: int, sigma: float, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    coords = torch.arange(kernel_size, device=device, dtype=dtype) - ((kernel_size - 1) / 2.0)
+    gaussian = torch.exp(-(coords.pow(2)) / max(2.0 * sigma * sigma, 1e-8))
+    gaussian = gaussian / gaussian.sum()
+    kernel_2d = gaussian[:, None] * gaussian[None, :]
+    return kernel_2d.view(1, 1, kernel_size, kernel_size)
+
+
+def _gaussian_blur(target: torch.Tensor, kernel_size: int, sigma: float) -> torch.Tensor:
+    if kernel_size <= 1 or sigma <= 0.0:
+        return target
+    if kernel_size % 2 == 0:
+        raise ValueError("Gaussian blur kernel size must be odd.")
+    weight = _gaussian_kernel(kernel_size, sigma, target.device, target.dtype)
+    groups = target.shape[1]
+    weight = weight.expand(groups, 1, kernel_size, kernel_size)
+    padding = kernel_size // 2
+    return F.conv2d(target, weight, padding=padding, groups=groups)
+
+
+def _decode_autoencoder(model: nn.Module, latent: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    if hasattr(model, "decode_with_aux"):
+        return model.decode_with_aux(latent)
+    reconstruction = model.decode(latent)  # type: ignore[attr-defined]
+    return reconstruction, {"coarse": reconstruction}
+
+
 def _autoencoder_reconstruction_loss(
     prediction: torch.Tensor,
     target: torch.Tensor,
     latent: torch.Tensor | None,
     config: NonlinearConfig,
+    auxiliary_outputs: dict[str, torch.Tensor] | None = None,
 ) -> torch.Tensor:
     loss = F.mse_loss(prediction, target)
     if config.gradient_loss_weight > 0.0:
@@ -111,6 +139,9 @@ def _autoencoder_reconstruction_loss(
         loss = loss + (config.fft_loss_weight * _fft_magnitude_l1(prediction, target))
     if latent is not None and config.latent_l1_weight > 0.0:
         loss = loss + (config.latent_l1_weight * latent.abs().mean())
+    if auxiliary_outputs and config.coarse_loss_weight > 0.0 and "coarse" in auxiliary_outputs:
+        coarse_target = _gaussian_blur(target, config.coarse_blur_kernel, config.coarse_blur_sigma)
+        loss = loss + (config.coarse_loss_weight * F.mse_loss(auxiliary_outputs["coarse"], coarse_target))
     return loss
 
 
@@ -225,21 +256,31 @@ def _evaluate_autoencoder(
     device: torch.device,
     stats: NormalizationStats,
     config: NonlinearConfig,
-) -> tuple[float, SnapshotMetricSummary, list[tuple[np.ndarray, np.ndarray]]]:
+) -> tuple[float, SnapshotMetricSummary, list[tuple[np.ndarray, np.ndarray]], SnapshotMetricSummary]:
     model.eval()
     losses = []
     truth_pred_pairs: list[tuple[np.ndarray, np.ndarray]] = []
+    coarse_pairs: list[tuple[np.ndarray, np.ndarray]] = []
     with torch.no_grad():
         for batch in loader:
             batch = batch.to(device)
-            recon, _ = model(batch)
-            loss = _autoencoder_reconstruction_loss(recon, batch, latent=None, config=config)
+            latent = model.encode(batch)  # type: ignore[attr-defined]
+            recon, auxiliary_outputs = _decode_autoencoder(model, latent)
+            loss = _autoencoder_reconstruction_loss(recon, batch, latent=None, config=config, auxiliary_outputs=auxiliary_outputs)
             losses.append(loss.item())
             truth = _denormalize(batch, stats).cpu().numpy()
             pred = _denormalize(recon, stats).cpu().numpy()
+            coarse = _denormalize(auxiliary_outputs["coarse"], stats).cpu().numpy()
             for true_item, pred_item in zip(truth, pred, strict=True):
                 truth_pred_pairs.append((true_item[0], pred_item[0]))
-    return float(np.mean(losses)), _summarize_snapshot_pairs(truth_pred_pairs), truth_pred_pairs
+            for true_item, coarse_item in zip(truth, coarse, strict=True):
+                coarse_pairs.append((true_item[0], coarse_item[0]))
+    return (
+        float(np.mean(losses)),
+        _summarize_snapshot_pairs(truth_pred_pairs),
+        truth_pred_pairs,
+        _summarize_snapshot_pairs(coarse_pairs),
+    )
 
 
 def _encode_all_frames(
@@ -248,20 +289,27 @@ def _encode_all_frames(
     stats: NormalizationStats,
     batch_size: int,
     device: torch.device,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     indices = np.arange(bundle.num_snapshots)
     dataset = SnapshotDataset(bundle.frames, indices, stats.mean, stats.std)
     loader = DataLoader(dataset, batch_size=min(batch_size, len(dataset)), shuffle=False)
     latents = []
     reconstructions = []
+    coarse_reconstructions = []
     model.eval()
     with torch.no_grad():
         for batch in loader:
             batch = batch.to(device)
-            recon, latent = model(batch)
+            latent = model.encode(batch)  # type: ignore[attr-defined]
+            recon, auxiliary_outputs = _decode_autoencoder(model, latent)
             latents.append(latent.cpu().numpy())
             reconstructions.append(_denormalize(recon, stats).cpu().numpy()[:, 0])
-    return np.concatenate(latents, axis=0), np.concatenate(reconstructions, axis=0).astype(np.float32)
+            coarse_reconstructions.append(_denormalize(auxiliary_outputs["coarse"], stats).cpu().numpy()[:, 0])
+    return (
+        np.concatenate(latents, axis=0),
+        np.concatenate(reconstructions, axis=0).astype(np.float32),
+        np.concatenate(coarse_reconstructions, axis=0).astype(np.float32),
+    )
 
 
 def _fit_linear_operator(latents: np.ndarray, train_idx: np.ndarray) -> np.ndarray:
@@ -356,7 +404,7 @@ def _train_autoencoder(
     config: NonlinearConfig,
     output_dir: Path,
     device: torch.device,
-) -> tuple[nn.Module, NormalizationStats, dict[str, object], np.ndarray, np.ndarray]:
+) -> tuple[nn.Module, NormalizationStats, dict[str, object], np.ndarray, np.ndarray, np.ndarray]:
     train_idx, test_idx = random_snapshot_split(bundle.num_snapshots, config.ae_train_ratio, config.seed)
     train_frames = bundle.frames[train_idx]
     stats = NormalizationStats(mean=float(train_frames.mean()), std=float(train_frames.std() + 1e-6))
@@ -371,6 +419,8 @@ def _train_autoencoder(
         config.ae_architecture,
         width_mult=config.ae_width_mult,
         coordconv=config.coordconv,
+        refine_blocks=config.refine_blocks,
+        refine_channels_mult=config.refine_channels_mult,
     ).to(device)
     optimizer = AdamW(model.parameters(), lr=config.ae_learning_rate, weight_decay=config.weight_decay)
     scheduler = _build_scheduler(
@@ -394,13 +444,20 @@ def _train_autoencoder(
         batch_losses = []
         for batch in train_loader:
             batch = batch.to(device)
-            recon, latent = model(batch)
-            loss = _autoencoder_reconstruction_loss(recon, batch, latent=latent, config=config)
+            latent = model.encode(batch)  # type: ignore[attr-defined]
+            recon, auxiliary_outputs = _decode_autoencoder(model, latent)
+            loss = _autoencoder_reconstruction_loss(
+                recon,
+                batch,
+                latent=latent,
+                config=config,
+                auxiliary_outputs=auxiliary_outputs,
+            )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
             batch_losses.append(loss.item())
-        val_loss, _, _ = _evaluate_autoencoder(model, test_loader, device, stats, config)
+        val_loss, _, _, _ = _evaluate_autoencoder(model, test_loader, device, stats, config)
         train_loss = float(np.mean(batch_losses))
         history["train_loss"].append(train_loss)
         history["val_loss"].append(val_loss)
@@ -418,7 +475,7 @@ def _train_autoencoder(
     ae_seconds = time.perf_counter() - start
     model.load_state_dict(best_state)
 
-    _, reconstruction_summary, preview_pairs = _evaluate_autoencoder(model, test_loader, device, stats, config)
+    _, reconstruction_summary, preview_pairs, coarse_summary = _evaluate_autoencoder(model, test_loader, device, stats, config)
     save_training_curves(
         {key: value for key, value in history.items() if key != "learning_rate"},
         output_dir / "ae_training_curves.png",
@@ -448,7 +505,7 @@ def _train_autoencoder(
         preview_artifacts["full"].append(full_name)
         preview_artifacts["wake"].append(wake_name)
 
-    latents, reconstructed_frames = _encode_all_frames(model, bundle, stats, config.batch_size, device)
+    latents, reconstructed_frames, coarse_frames = _encode_all_frames(model, bundle, stats, config.batch_size, device)
     peak_memory_gb = float(torch.cuda.max_memory_allocated(device) / (1024**3)) if device.type == "cuda" else 0.0
     metrics = {
         "train_indices": train_idx.tolist(),
@@ -456,6 +513,9 @@ def _train_autoencoder(
         "recon_mse": reconstruction_summary.mse,
         "recon_rmse": reconstruction_summary.rmse,
         "recon_nrmse": reconstruction_summary.nrmse,
+        "coarse_recon_mse": coarse_summary.mse,
+        "coarse_recon_rmse": coarse_summary.rmse,
+        "coarse_recon_nrmse": coarse_summary.nrmse,
         "history": history,
         "ae_seconds": ae_seconds,
         "peak_memory_gb_after_ae": peak_memory_gb,
@@ -465,7 +525,7 @@ def _train_autoencoder(
             "training_curves": "ae_training_curves.png",
         },
     }
-    return model, stats, metrics, latents, reconstructed_frames
+    return model, stats, metrics, latents, reconstructed_frames, coarse_frames
 
 
 def _train_dynamics(
@@ -640,11 +700,14 @@ def run_nonlinear_pipeline(
     compare_steps = _compare_steps(config.compare_steps, bundle.num_snapshots)
     _save_truth_reference(bundle, compare_steps, output_dir, config)
 
-    autoencoder, stats, ae_metrics, latents, reconstructed_frames = _train_autoencoder(bundle, config, output_dir, device)
+    autoencoder, stats, ae_metrics, latents, reconstructed_frames, coarse_frames = _train_autoencoder(bundle, config, output_dir, device)
     ae_floor_metrics = _compute_step_metrics(bundle.frames, reconstructed_frames, compare_steps)
+    coarse_floor_metrics = _compute_step_metrics(bundle.frames, coarse_frames, compare_steps)
     ae_floor_artifacts = _save_step_artifacts("ae_floor", bundle.frames, reconstructed_frames, compare_steps, output_dir, config)
     ae_floor_t100 = ae_floor_metrics.get("step_100", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
     ae_floor_t150 = ae_floor_metrics.get("step_150", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
+    coarse_t100 = coarse_floor_metrics.get("step_100", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
+    coarse_t150 = coarse_floor_metrics.get("step_150", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
     ae_score = compute_ae_score(ae_metrics["recon_rmse"], ae_floor_t100["rmse"], ae_floor_t150["rmse"])
     if ae_only:
         metrics = {
@@ -661,6 +724,12 @@ def run_nonlinear_pipeline(
             "recon_mse": ae_metrics["recon_mse"],
             "recon_rmse": ae_metrics["recon_rmse"],
             "recon_nrmse": ae_metrics["recon_nrmse"],
+            "coarse_only_mse_t100": coarse_t100["mse"],
+            "coarse_only_rmse_t100": coarse_t100["rmse"],
+            "coarse_only_nrmse_t100": coarse_t100["nrmse"],
+            "coarse_only_mse_t150": coarse_t150["mse"],
+            "coarse_only_rmse_t150": coarse_t150["rmse"],
+            "coarse_only_nrmse_t150": coarse_t150["nrmse"],
             "ae_floor_mse_t100": ae_floor_t100["mse"],
             "ae_floor_rmse_t100": ae_floor_t100["rmse"],
             "ae_floor_nrmse_t100": ae_floor_t100["nrmse"],
@@ -706,6 +775,12 @@ def run_nonlinear_pipeline(
         "recon_mse": ae_metrics["recon_mse"],
         "recon_rmse": ae_metrics["recon_rmse"],
         "recon_nrmse": ae_metrics["recon_nrmse"],
+        "coarse_only_mse_t100": coarse_t100["mse"],
+        "coarse_only_rmse_t100": coarse_t100["rmse"],
+        "coarse_only_nrmse_t100": coarse_t100["nrmse"],
+        "coarse_only_mse_t150": coarse_t150["mse"],
+        "coarse_only_rmse_t150": coarse_t150["rmse"],
+        "coarse_only_nrmse_t150": coarse_t150["nrmse"],
         "mse_t100": step_100["mse"],
         "rmse_t100": step_100["rmse"],
         "nrmse_t100": step_100["nrmse"],

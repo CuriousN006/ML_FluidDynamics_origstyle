@@ -41,3 +41,10 @@ dbffbf5	0.020998	0.635222	0.773933	0.748281	2.517	388.9	keep	parity rerun: deter
 290f90e-dirty	0.000709	0.025058	0.025909	0.023940	1.724	303.2	discard	Reg-1 | latent-L1 only
 290f90e-dirty	0.013191	0.024901	0.577243	0.565026	1.724	301.7	discard	Reg-2 | dyn-L2 only
 290f90e-dirty	0.000764	0.024994	0.026909	0.027200	1.724	441.9	discard	Reg-4 | strong AE and dynamics regularization
+c296c50-dirty	0.000670	0.024214	0.023006	0.023289	1.957	508.9	keep	coarse-to-fine Stage 3 R5 | residual_refine latent=24 refine_blocks=1 refine_channels_mult=1.25 coarse_loss=0.25
+c296c50-dirty	0.001285	0.022676	0.038655	0.057520	1.827	417.3	discard	coarse-to-fine Stage 3 R1 | residual_refine latent=24 refine_blocks=1 refine_channels_mult=1.00 coarse_loss=0.25
+c296c50-dirty	0.000734	0.022264	0.021074	0.029685	1.957	487.9	discard	Reg-0 | residual_refine regularizer ablation
+c296c50-dirty	0.000613	0.024214	0.022138	0.019868	1.957	518.0	keep	Reg-1 | residual_refine regularizer ablation
+c296c50-dirty	0.000720	0.022264	0.021016	0.028791	1.957	487.2	discard	Reg-2 | residual_refine regularizer ablation
+c296c50-dirty	0.000670	0.024214	0.023006	0.023289	1.957	516.2	discard	Reg-3 | residual_refine regularizer ablation
+c296c50-dirty	0.092935	0.021139	2.788586	4.809601	1.957	447.6	discard	Reg-4 | residual_refine regularizer ablation

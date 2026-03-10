@@ -10,9 +10,14 @@ def test_apply_cli_overrides_updates_scheduler_and_regularizers() -> None:
     args = Namespace(
         smoke=False,
         layout="portrait",
-        ae_architecture="residual_multiscale",
-        ae_width_mult=1.6,
-        coordconv=True,
+        ae_architecture="residual_refine",
+        ae_width_mult=1.0,
+        coordconv=False,
+        coarse_loss_weight=0.4,
+        coarse_blur_kernel=11,
+        coarse_blur_sigma=1.5,
+        refine_blocks=2,
+        refine_channels_mult=1.25,
         dynamics_model="residual_linear",
         ae_epochs=None,
         dyn_epochs=320,
@@ -43,9 +48,14 @@ def test_apply_cli_overrides_updates_scheduler_and_regularizers() -> None:
     )
     config = apply_cli_overrides(NonlinearConfig(), args)
     assert config.layout == "portrait"
-    assert config.ae_architecture == "residual_multiscale"
-    assert config.ae_width_mult == 1.6
-    assert config.coordconv is True
+    assert config.ae_architecture == "residual_refine"
+    assert config.ae_width_mult == 1.0
+    assert config.coordconv is False
+    assert config.coarse_loss_weight == 0.4
+    assert config.coarse_blur_kernel == 11
+    assert config.coarse_blur_sigma == 1.5
+    assert config.refine_blocks == 2
+    assert config.refine_channels_mult == 1.25
     assert config.dynamics_model == "residual_linear"
     assert config.dyn_epochs == 320
     assert config.ae_learning_rate == 5e-4

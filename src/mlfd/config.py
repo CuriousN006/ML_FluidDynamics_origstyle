@@ -118,6 +118,11 @@ class NonlinearConfig:
     ae_architecture: str = "residual"
     ae_width_mult: float = 1.0
     coordconv: bool = False
+    coarse_loss_weight: float = 0.25
+    coarse_blur_kernel: int = 9
+    coarse_blur_sigma: float = 2.0
+    refine_blocks: int = 1
+    refine_channels_mult: float = 1.0
     dynamics_model: str = "residual_linear"
     ae_epochs: int = 160
     dyn_epochs: int = 260

@@ -97,9 +97,13 @@ class BaselineConvAutoencoder(nn.Module, CoordInputMixin):
         hidden = F.interpolate(hidden, size=self.input_shape, mode="bilinear", align_corners=False)
         return self.decoder_blocks(hidden)
 
+    def decode_with_aux(self, z: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        reconstruction = self.decode(z)
+        return reconstruction, {"coarse": reconstruction}
+
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         latent = self.encode(x)
-        recon = self.decode(latent)
+        recon, _ = self.decode_with_aux(latent)
         return recon, latent
 
 
@@ -119,6 +123,8 @@ class ResidualConvAutoencoder(nn.Module, CoordInputMixin):
         c2 = _scaled_channels(48, width_mult)
         c3 = _scaled_channels(72, width_mult)
         c4 = _scaled_channels(96, width_mult)
+        self.stem_channels = stem_channels
+        self.decoder_channels = c4
         self.stem = nn.Sequential(
             nn.Conv2d(self.encoder_input_channels, stem_channels, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
@@ -136,7 +142,6 @@ class ResidualConvAutoencoder(nn.Module, CoordInputMixin):
         bottleneck_shape = self._infer_bottleneck_shape(input_shape)
         self.bottleneck_shape = bottleneck_shape
         flattened = c4 * bottleneck_shape[0] * bottleneck_shape[1]
-        self.decoder_channels = c4
         self.encoder_head = nn.Linear(flattened, latent_dim)
         self.decoder_head = nn.Linear(latent_dim, flattened)
 
@@ -180,7 +185,7 @@ class ResidualConvAutoencoder(nn.Module, CoordInputMixin):
         encoded = self._encode_features(x)
         return self.encoder_head(encoded.flatten(start_dim=1))
 
-    def decode(self, z: torch.Tensor) -> torch.Tensor:
+    def _decode_features(self, z: torch.Tensor) -> torch.Tensor:
         hidden = self.decoder_head(z).view(-1, self.decoder_channels, self.bottleneck_shape[0], self.bottleneck_shape[1])
         hidden = F.interpolate(hidden, scale_factor=2.0, mode="bilinear", align_corners=False)
         hidden = self.up1(hidden)
@@ -190,12 +195,56 @@ class ResidualConvAutoencoder(nn.Module, CoordInputMixin):
         hidden = self.up3(hidden)
         hidden = F.interpolate(hidden, size=self.input_shape, mode="bilinear", align_corners=False)
         hidden = self.up4(hidden)
+        return hidden
+
+    def decode(self, z: torch.Tensor) -> torch.Tensor:
+        hidden = self._decode_features(z)
         return self.output_head(hidden)
+
+    def decode_with_aux(self, z: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        reconstruction = self.decode(z)
+        return reconstruction, {"coarse": reconstruction}
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         latent = self.encode(x)
-        recon = self.decode(latent)
+        recon, _ = self.decode_with_aux(latent)
         return recon, latent
+
+
+class ResidualRefineAutoencoder(ResidualConvAutoencoder):
+    def __init__(
+        self,
+        input_shape: tuple[int, int],
+        latent_dim: int,
+        width_mult: float = 1.0,
+        coordconv: bool = False,
+        refine_blocks: int = 1,
+        refine_channels_mult: float = 1.0,
+    ) -> None:
+        super().__init__(input_shape, latent_dim, width_mult=width_mult, coordconv=coordconv)
+        self.refine_blocks = max(1, refine_blocks)
+        refine_channels = _scaled_channels(self.stem_channels, refine_channels_mult)
+        layers: list[nn.Module] = [
+            nn.Conv2d(self.stem_channels + 1, refine_channels, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+        ]
+        for _ in range(self.refine_blocks):
+            layers.append(ResidualBlock(refine_channels))
+        layers.append(nn.Conv2d(refine_channels, 1, kernel_size=3, padding=1))
+        self.refine_head = nn.Sequential(*layers)
+        self.coarse_head = nn.Conv2d(self.stem_channels, 1, kernel_size=3, padding=1)
+
+    def decode_with_aux(self, z: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        hidden = self._decode_features(z)
+        coarse = self.coarse_head(hidden)
+        refine_input = torch.cat([hidden, coarse], dim=1)
+        refine_residual = self.refine_head(refine_input)
+        final = coarse + refine_residual
+        return final, {"coarse": coarse, "refine_residual": refine_residual}
+
+    def decode(self, z: torch.Tensor) -> torch.Tensor:
+        reconstruction, _ = self.decode_with_aux(z)
+        return reconstruction
 
 
 class ResidualMultiscaleAutoencoder(nn.Module, CoordInputMixin):
@@ -305,9 +354,13 @@ class ResidualMultiscaleAutoencoder(nn.Module, CoordInputMixin):
         hidden = self.up4(hidden)
         return self.output_head(hidden) + scale3 + scale2
 
+    def decode_with_aux(self, z: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        reconstruction = self.decode(z)
+        return reconstruction, {"coarse": reconstruction}
+
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         latent = self.encode(x)
-        recon = self.decode(latent)
+        recon, _ = self.decode_with_aux(latent)
         return recon, latent
 
 
@@ -318,11 +371,22 @@ def build_autoencoder(
     *,
     width_mult: float = 1.0,
     coordconv: bool = False,
+    refine_blocks: int = 1,
+    refine_channels_mult: float = 1.0,
 ) -> nn.Module:
     if architecture == "baseline":
         return BaselineConvAutoencoder(input_shape, latent_dim, width_mult=width_mult, coordconv=coordconv)
     if architecture == "residual":
         return ResidualConvAutoencoder(input_shape, latent_dim, width_mult=width_mult, coordconv=coordconv)
+    if architecture == "residual_refine":
+        return ResidualRefineAutoencoder(
+            input_shape,
+            latent_dim,
+            width_mult=width_mult,
+            coordconv=coordconv,
+            refine_blocks=refine_blocks,
+            refine_channels_mult=refine_channels_mult,
+        )
     if architecture == "residual_multiscale":
         return ResidualMultiscaleAutoencoder(input_shape, latent_dim, width_mult=width_mult, coordconv=coordconv)
     raise ValueError(f"Unsupported autoencoder architecture: {architecture}")

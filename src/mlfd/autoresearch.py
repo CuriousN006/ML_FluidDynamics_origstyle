@@ -25,6 +25,11 @@ def _default_command(
     ae_architecture: str | None = None,
     ae_width_mult: float | None = None,
     coordconv: bool | None = None,
+    coarse_loss_weight: float | None = None,
+    coarse_blur_kernel: int | None = None,
+    coarse_blur_sigma: float | None = None,
+    refine_blocks: int | None = None,
+    refine_channels_mult: float | None = None,
     dynamics_model: str | None = None,
     ae_epochs: int | None = None,
     dyn_epochs: int | None = None,
@@ -63,6 +68,11 @@ def _default_command(
     _append_optional(command, "--ae-width-mult", ae_width_mult)
     if coordconv is not None:
         _append_optional(command, "--coordconv", str(coordconv).lower())
+    _append_optional(command, "--coarse-loss-weight", coarse_loss_weight)
+    _append_optional(command, "--coarse-blur-kernel", coarse_blur_kernel)
+    _append_optional(command, "--coarse-blur-sigma", coarse_blur_sigma)
+    _append_optional(command, "--refine-blocks", refine_blocks)
+    _append_optional(command, "--refine-channels-mult", refine_channels_mult)
     _append_optional(command, "--dynamics-model", dynamics_model)
     _append_optional(command, "--ae-epochs", ae_epochs)
     _append_optional(command, "--dyn-epochs", dyn_epochs)
@@ -131,6 +141,23 @@ def _sample_search_params(trial: object, family: str) -> dict[str, object]:
     import optuna
 
     del optuna  # imported for type/runtime validation only
+    if family == "residual_refine":
+        return {
+            "layout": "portrait",
+            "ae_architecture": family,
+            "ae_width_mult": 1.0,
+            "coordconv": False,
+            "latent_dim": int(trial.suggest_categorical("latent_dim", [24, 32])),
+            "gradient_loss_weight": 0.1,
+            "fft_loss_weight": 0.0,
+            "latent_l1_weight": 1e-4,
+            "coarse_loss_weight": float(trial.suggest_float("coarse_loss_weight", 0.15, 0.45)),
+            "coarse_blur_kernel": 9,
+            "coarse_blur_sigma": 2.0,
+            "refine_blocks": int(trial.suggest_categorical("refine_blocks", [1, 2])),
+            "refine_channels_mult": float(trial.suggest_categorical("refine_channels_mult", [1.0, 1.25])),
+            "ae_learning_rate": float(trial.suggest_float("ae_learning_rate", 5e-4, 1.2e-3, log=True)),
+        }
     params = {
         "layout": "portrait",
         "ae_architecture": family,
@@ -164,6 +191,19 @@ def _enqueue_warm_start_trials(study: object, family: str) -> None:
         study.enqueue_trial({**baseline_trial, "coordconv": False})
         study.enqueue_trial({**baseline_trial, "coordconv": True})
         return
+    if family == "residual_refine":
+        study.enqueue_trial(
+            {
+                **baseline_trial,
+                "coordconv": False,
+                "coarse_loss_weight": 0.25,
+                "coarse_blur_kernel": 9,
+                "coarse_blur_sigma": 2.0,
+                "refine_blocks": 1,
+                "refine_channels_mult": 1.0,
+            }
+        )
+        return
     study.enqueue_trial({**baseline_trial, "coordconv": True})
 
 
@@ -180,9 +220,18 @@ def main() -> None:
     run_parser.add_argument("--smoke", action="store_true")
     run_parser.add_argument("--next-hypothesis", default="")
     run_parser.add_argument("--layout", choices=["landscape", "portrait"], default=None)
-    run_parser.add_argument("--ae-architecture", choices=["baseline", "residual", "residual_multiscale"], default=None)
+    run_parser.add_argument(
+        "--ae-architecture",
+        choices=["baseline", "residual", "residual_refine", "residual_multiscale"],
+        default=None,
+    )
     run_parser.add_argument("--ae-width-mult", type=float, default=None)
     run_parser.add_argument("--coordconv", choices=["true", "false"], default=None)
+    run_parser.add_argument("--coarse-loss-weight", type=float, default=None)
+    run_parser.add_argument("--coarse-blur-kernel", type=int, default=None)
+    run_parser.add_argument("--coarse-blur-sigma", type=float, default=None)
+    run_parser.add_argument("--refine-blocks", type=int, default=None)
+    run_parser.add_argument("--refine-channels-mult", type=float, default=None)
     run_parser.add_argument("--dynamics-model", choices=["mlp", "residual_linear"], default=None)
     run_parser.add_argument("--ae-epochs", type=int, default=None)
     run_parser.add_argument("--dyn-epochs", type=int, default=None)
@@ -214,7 +263,11 @@ def main() -> None:
     search_parser = subparsers.add_parser("search-ae", help="Run an Optuna/TPE AE-only search and full-evaluate the top candidates.")
     search_parser.add_argument("--run-tag", default=ProjectPaths().run_tag)
     search_parser.add_argument("--study-name", default="residual-multiscale")
-    search_parser.add_argument("--family", choices=["residual", "residual_multiscale"], default="residual_multiscale")
+    search_parser.add_argument(
+        "--family",
+        choices=["residual", "residual_refine", "residual_multiscale"],
+        default="residual_multiscale",
+    )
     search_parser.add_argument("--trials", type=int, default=12)
     search_parser.add_argument("--top-k", type=int, default=3)
     search_parser.add_argument("--device", default=None)
@@ -253,6 +306,11 @@ def main() -> None:
                 ae_architecture=str(params["ae_architecture"]),
                 ae_width_mult=float(params["ae_width_mult"]),
                 coordconv=bool(params["coordconv"]),
+                coarse_loss_weight=float(params.get("coarse_loss_weight", 0.25)),
+                coarse_blur_kernel=int(params.get("coarse_blur_kernel", 9)),
+                coarse_blur_sigma=float(params.get("coarse_blur_sigma", 2.0)),
+                refine_blocks=int(params.get("refine_blocks", 1)),
+                refine_channels_mult=float(params.get("refine_channels_mult", 1.0)),
                 latent_dim=int(params["latent_dim"]),
                 ae_learning_rate=float(params["ae_learning_rate"]),
                 gradient_loss_weight=float(params["gradient_loss_weight"]),
@@ -316,6 +374,11 @@ def main() -> None:
                 ae_architecture=str(params["ae_architecture"]),
                 ae_width_mult=float(params["ae_width_mult"]),
                 coordconv=bool(params["coordconv"]),
+                coarse_loss_weight=float(params.get("coarse_loss_weight", 0.25)),
+                coarse_blur_kernel=int(params.get("coarse_blur_kernel", 9)),
+                coarse_blur_sigma=float(params.get("coarse_blur_sigma", 2.0)),
+                refine_blocks=int(params.get("refine_blocks", 1)),
+                refine_channels_mult=float(params.get("refine_channels_mult", 1.0)),
                 dynamics_model="residual_linear",
                 latent_dim=int(params["latent_dim"]),
                 ae_learning_rate=float(params["ae_learning_rate"]),
@@ -347,7 +410,7 @@ def main() -> None:
                 description=(
                     f"AE search top-{rank} reevaluation | family={params['ae_architecture']} | "
                     f"latent={params['latent_dim']} | width={params['ae_width_mult']:.3f} | "
-                    f"coordconv={params['coordconv']}"
+                    f"coordconv={params['coordconv']} | refine_blocks={params.get('refine_blocks', 'n/a')}"
                 ),
                 status=status,
                 failure_reason=failure_reason,
@@ -393,6 +456,11 @@ def main() -> None:
         ae_architecture=args.ae_architecture,
         ae_width_mult=args.ae_width_mult,
         coordconv=None if args.coordconv is None else args.coordconv == "true",
+        coarse_loss_weight=args.coarse_loss_weight,
+        coarse_blur_kernel=args.coarse_blur_kernel,
+        coarse_blur_sigma=args.coarse_blur_sigma,
+        refine_blocks=args.refine_blocks,
+        refine_channels_mult=args.refine_channels_mult,
         dynamics_model=args.dynamics_model,
         ae_epochs=args.ae_epochs,
         dyn_epochs=args.dyn_epochs,

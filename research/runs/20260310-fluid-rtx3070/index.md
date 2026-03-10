@@ -44,10 +44,17 @@
 - exp-0040 | discard | score=0.000709 | Reg-1 | latent-L1 only
 - exp-0041 | discard | score=0.013191 | Reg-2 | dyn-L2 only
 - exp-0042 | discard | score=0.000764 | Reg-4 | strong AE and dynamics regularization
+- exp-0043 | keep | score=0.000670 | coarse-to-fine Stage 3 R5 | residual_refine latent=24 refine_blocks=1 refine_channels_mult=1.25 coarse_loss=0.25
+- exp-0044 | discard | score=0.001285 | coarse-to-fine Stage 3 R1 | residual_refine latent=24 refine_blocks=1 refine_channels_mult=1.00 coarse_loss=0.25
+- exp-0045 | discard | score=0.000734 | Reg-0 | residual_refine regularizer ablation
+- exp-0046 | keep | score=0.000613 | Reg-1 | residual_refine regularizer ablation
+- exp-0047 | discard | score=0.000720 | Reg-2 | residual_refine regularizer ablation
+- exp-0048 | discard | score=0.000670 | Reg-3 | residual_refine regularizer ablation
+- exp-0049 | discard | score=0.092935 | Reg-4 | residual_refine regularizer ablation
 
 ## Best Model Changes
 
-- Current best: exp-0028 (0.000710)
+- Current best: exp-0046 (0.000613)
 
 ## Open Risks
 

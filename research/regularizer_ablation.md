@@ -1,16 +1,21 @@
 # Regularizer Ablation
 
-This ablation was rerun on the recovered portrait residual AE architecture so
-that the result matches the final nonlinear mainline instead of the older
-pre-recovery model.
+This ablation was rerun on the new coarse-to-fine nonlinear baseline so that
+the assignment discussion matches the actual final model instead of the older
+portrait residual AE.
 
 Locked baseline for this study:
 
 - `layout=portrait`
-- `ae_architecture=residual`
+- `ae_architecture=residual_refine`
 - `ae_width_mult=1.0`
 - `coordconv=False`
 - `latent_dim=24`
+- `coarse_loss_weight=0.25`
+- `coarse_blur_kernel=9`
+- `coarse_blur_sigma=2.0`
+- `refine_blocks=1`
+- `refine_channels_mult=1.25`
 - `gradient_loss_weight=0.10`
 - `fft_loss_weight=0.0`
 - `dynamics_model=residual_linear`
@@ -18,24 +23,26 @@ Locked baseline for this study:
 
 | Label | Experiment | latent_l1_weight | dyn_l2_weight | primary_score | recon_rmse | rmse_t100 | rmse_t150 | peak_memory_gb |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Reg-0 | exp-0039 | 0 | 0 | 0.013191 | 0.091986 | 0.540997 | 0.500955 | 1.724 |
-| Reg-1 | exp-0040 | 1e-4 | 0 | 0.000709 | 0.025058 | 0.026003 | 0.023907 | 1.724 |
-| Reg-2 | exp-0041 | 0 | 1e-5 | 0.013191 | 0.091986 | 0.540997 | 0.500955 | 1.724 |
-| Reg-3 | exp-0037 | 1e-4 | 1e-5 | 0.000710 | 0.025058 | 0.026003 | 0.023945 | 1.724 |
-| Reg-4 | exp-0042 | 5e-4 | 5e-5 | 0.000764 | 0.025903 | 0.026463 | 0.024683 | 1.724 |
+| Reg-0 | exp-0045 | 0 | 0 | 0.000734 | 0.022264 | 0.021074 | 0.029685 | 1.957 |
+| Reg-1 | exp-0046 | 1e-4 | 0 | 0.000613 | 0.024214 | 0.022138 | 0.019868 | 1.957 |
+| Reg-2 | exp-0047 | 0 | 1e-5 | 0.000720 | 0.022264 | 0.021016 | 0.028791 | 1.957 |
+| Reg-3 | exp-0048 | 1e-4 | 1e-5 | 0.000670 | 0.024214 | 0.023006 | 0.023289 | 1.957 |
+| Reg-4 | exp-0049 | 5e-4 | 5e-5 | 0.092935 | 0.021139 | 2.788586 | 4.809601 | 1.957 |
 
 ## Takeaways
 
-- Some regularization is necessary. Removing both regularizers in `Reg-0`
-  causes the rollout to collapse even though the architecture is otherwise
-  unchanged.
-- `latent_l1_weight=1e-4` is the key regularizer in the recovered model.
-  `Reg-1` nearly exactly matches the recovered baseline and slightly edges the
-  combined setting at `t=150`.
-- `dyn_l2_weight` alone is not enough. `Reg-2` falls back to the same bad
-  behavior as `Reg-0`, so the AE-side latent sparsity matters more than the
-  dynamics-side L2 term here.
-- The combined default `Reg-3` is still a safe, conservative choice because it
-  reproduces the current best configuration almost exactly.
-- Stronger regularization in `Reg-4` underfits mildly. Reconstruction and
-  rollout both worsen, which is consistent with excessive smoothing of the wake.
+- `latent_l1_weight=1e-4` is now the best regularizer. `Reg-1` is the overall
+  winner and becomes the new nonlinear baseline.
+- `dyn_l2_weight` is not helpful on its own for the coarse-to-fine decoder.
+  `Reg-2` is only marginally better than `Reg-0`, and both are much worse than
+  `Reg-1` at `t=150`.
+- The tradeoff changed compared with the older residual AE: `Reg-0` and
+  `Reg-2` slightly improve raw reconstruction RMSE, but they hurt long-horizon
+  rollout stability. In this architecture, regularization matters more for
+  stable future prediction than for lowering the AE floor.
+- The combined setting `Reg-3` is still safe and much better than `Reg-0`, but
+  it is no longer the best choice. The extra dynamics L2 term slightly hurts
+  the final rollout relative to `Reg-1`.
+- Stronger regularization in `Reg-4` is clearly too much. Reconstruction stays
+  numerically low, but the rollout diverges and the wake dynamics collapse,
+  which is consistent with severe over-constraint and underfitting.
