@@ -120,3 +120,52 @@ def save_training_curves(history: dict[str, list[float]], path: Path, title: str
     ax.grid(alpha=0.25)
     _save_figure(fig, path)
 
+
+def save_latent_trajectory_pca(
+    true_latents: np.ndarray,
+    predicted_latents: np.ndarray,
+    path: Path,
+    title: str,
+) -> None:
+    centered = true_latents - true_latents.mean(axis=0, keepdims=True)
+    _, _, vt = np.linalg.svd(centered, full_matrices=False)
+    basis = vt[:2].T if vt.size else np.zeros((true_latents.shape[1], 2), dtype=np.float32)
+    if basis.shape[1] < 2:
+        basis = np.pad(basis, ((0, 0), (0, 2 - basis.shape[1])))
+    true_proj = centered @ basis
+    pred_proj = (predicted_latents - true_latents.mean(axis=0, keepdims=True)) @ basis
+
+    fig, ax = plt.subplots(figsize=(6.5, 5.5))
+    steps = np.arange(true_proj.shape[0])
+    scatter = ax.scatter(true_proj[:, 0], true_proj[:, 1], c=steps, cmap="viridis", s=20, label="Encoded latent")
+    ax.plot(pred_proj[:, 0], pred_proj[:, 1], color="black", linewidth=1.2, alpha=0.7, label="Rollout latent")
+    ax.set_xlabel("PC1")
+    ax.set_ylabel("PC2")
+    ax.set_title(title)
+    ax.legend()
+    ax.grid(alpha=0.25)
+    fig.colorbar(scatter, ax=ax, fraction=0.046, pad=0.04, label="Time step")
+    _save_figure(fig, path)
+
+
+def save_latent_time_series(
+    true_latents: np.ndarray,
+    predicted_latents: np.ndarray,
+    path: Path,
+    title: str,
+    dims: int = 3,
+) -> None:
+    num_dims = min(dims, true_latents.shape[1], predicted_latents.shape[1])
+    fig, axes = plt.subplots(num_dims, 1, figsize=(8, 2.6 * num_dims), sharex=True)
+    if num_dims == 1:
+        axes = [axes]
+    steps = np.arange(true_latents.shape[0])
+    for dim_index, ax in enumerate(axes):
+        ax.plot(steps, true_latents[:, dim_index], label="Encoded latent", linewidth=1.6)
+        ax.plot(steps, predicted_latents[:, dim_index], label="Rollout latent", linewidth=1.2, linestyle="--")
+        ax.set_ylabel(f"z{dim_index + 1}")
+        ax.grid(alpha=0.25)
+    axes[0].set_title(title)
+    axes[-1].set_xlabel("Time step")
+    axes[0].legend()
+    _save_figure(fig, path)

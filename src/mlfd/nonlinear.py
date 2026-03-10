@@ -10,6 +10,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
@@ -17,7 +18,12 @@ from .config import NonlinearConfig, ProjectPaths
 from .data import FieldBundle, load_field_bundle, random_snapshot_split, sequential_transition_split
 from .metrics import mse, nrmse, primary_score, rmse
 from .models import ConvAutoencoder, LatentDynamicsMLP
-from .plots import save_comparison_panel, save_training_curves
+from .plots import (
+    save_comparison_panel,
+    save_latent_time_series,
+    save_latent_trajectory_pca,
+    save_training_curves,
+)
 from .utils import set_seed, utc_timestamp, write_json
 
 
@@ -45,6 +51,13 @@ class NormalizationStats:
     std: float
 
 
+@dataclass
+class SnapshotMetricSummary:
+    mse: float
+    rmse: float
+    nrmse: float
+
+
 def _denormalize(x: torch.Tensor | np.ndarray, stats: NormalizationStats) -> torch.Tensor | np.ndarray:
     return (x * stats.std) + stats.mean
 
@@ -69,6 +82,34 @@ def _build_loader(
         batch_size=min(batch_size, len(dataset)),
         shuffle=shuffle,
         generator=generator,
+    )
+
+
+def _build_scheduler(
+    name: str,
+    optimizer: torch.optim.Optimizer,
+    factor: float,
+    patience: int,
+    min_lr: float,
+) -> ReduceLROnPlateau | None:
+    if name == "none":
+        return None
+    if name == "plateau":
+        return ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=factor,
+            patience=patience,
+            min_lr=min_lr,
+        )
+    raise ValueError(f"Unsupported scheduler type: {name}")
+
+
+def _summarize_snapshot_pairs(truth_pred_pairs: list[tuple[np.ndarray, np.ndarray]]) -> SnapshotMetricSummary:
+    return SnapshotMetricSummary(
+        mse=float(np.mean([mse(true, pred) for true, pred in truth_pred_pairs])),
+        rmse=float(np.mean([rmse(true, pred) for true, pred in truth_pred_pairs])),
+        nrmse=float(np.mean([nrmse(true, pred) for true, pred in truth_pred_pairs])),
     )
 
 
@@ -114,7 +155,7 @@ def _evaluate_autoencoder(
     loader: DataLoader[torch.Tensor],
     device: torch.device,
     stats: NormalizationStats,
-) -> tuple[float, float, float, list[tuple[np.ndarray, np.ndarray]]]:
+) -> tuple[float, SnapshotMetricSummary, list[tuple[np.ndarray, np.ndarray]]]:
     model.eval()
     losses = []
     truth_pred_pairs: list[tuple[np.ndarray, np.ndarray]] = []
@@ -127,9 +168,7 @@ def _evaluate_autoencoder(
             pred = _denormalize(recon, stats).cpu().numpy()
             for true_item, pred_item in zip(truth, pred, strict=True):
                 truth_pred_pairs.append((true_item[0], pred_item[0]))
-    recon_rmse = float(np.mean([rmse(true, pred) for true, pred in truth_pred_pairs]))
-    recon_nrmse = float(np.mean([nrmse(true, pred) for true, pred in truth_pred_pairs]))
-    return float(np.mean(losses)), recon_rmse, recon_nrmse, truth_pred_pairs
+    return float(np.mean(losses)), _summarize_snapshot_pairs(truth_pred_pairs), truth_pred_pairs
 
 
 def _train_autoencoder(
@@ -147,8 +186,15 @@ def _train_autoencoder(
     test_loader = _build_loader(test_dataset, config.batch_size, False, config.seed + 1)
 
     model = ConvAutoencoder((bundle.height, bundle.width), config.latent_dim).to(device)
-    optimizer = AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
-    history = {"train_loss": [], "val_loss": []}
+    optimizer = AdamW(model.parameters(), lr=config.ae_learning_rate, weight_decay=config.weight_decay)
+    scheduler = _build_scheduler(
+        config.ae_scheduler,
+        optimizer,
+        config.ae_scheduler_factor,
+        config.ae_scheduler_patience,
+        config.ae_min_learning_rate,
+    )
+    history = {"train_loss": [], "val_loss": [], "learning_rate": []}
     best_state = copy.deepcopy(model.state_dict())
     best_loss = float("inf")
     patience = 0
@@ -168,10 +214,13 @@ def _train_autoencoder(
             loss.backward()
             optimizer.step()
             batch_losses.append(loss.item())
-        val_loss, _, _, _ = _evaluate_autoencoder(model, test_loader, device, stats)
+        val_loss, _, _ = _evaluate_autoencoder(model, test_loader, device, stats)
         train_loss = float(np.mean(batch_losses))
         history["train_loss"].append(train_loss)
         history["val_loss"].append(val_loss)
+        if scheduler is not None:
+            scheduler.step(val_loss)
+        history["learning_rate"].append(float(optimizer.param_groups[0]["lr"]))
         if val_loss < best_loss:
             best_loss = val_loss
             best_state = copy.deepcopy(model.state_dict())
@@ -183,8 +232,12 @@ def _train_autoencoder(
     ae_seconds = time.perf_counter() - start
     model.load_state_dict(best_state)
 
-    _, recon_rmse, recon_nrmse, preview_pairs = _evaluate_autoencoder(model, test_loader, device, stats)
-    save_training_curves(history, output_dir / "ae_training_curves.png", "Autoencoder training")
+    _, reconstruction_summary, preview_pairs = _evaluate_autoencoder(model, test_loader, device, stats)
+    save_training_curves(
+        {key: value for key, value in history.items() if key != "learning_rate"},
+        output_dir / "ae_training_curves.png",
+        "Autoencoder training",
+    )
     for preview_idx, (true_snapshot, pred_snapshot) in enumerate(preview_pairs[: config.num_preview_images], start=1):
         save_comparison_panel(
             true_snapshot,
@@ -205,11 +258,18 @@ def _train_autoencoder(
     metrics = {
         "train_indices": train_idx.tolist(),
         "test_indices": test_idx.tolist(),
-        "recon_rmse": recon_rmse,
-        "recon_nrmse": recon_nrmse,
+        "recon_mse": reconstruction_summary.mse,
+        "recon_rmse": reconstruction_summary.rmse,
+        "recon_nrmse": reconstruction_summary.nrmse,
         "history": history,
         "ae_seconds": ae_seconds,
         "peak_memory_gb_after_ae": peak_memory_gb,
+        "artifact_paths": {
+            "reconstruction_previews": [
+                f"ae_reconstruction_preview_{preview_idx}.png" for preview_idx in range(1, config.num_preview_images + 1)
+            ],
+            "training_curves": "ae_training_curves.png",
+        },
     }
     return model, stats, metrics, latents
 
@@ -226,8 +286,15 @@ def _train_dynamics(
     train_idx, val_idx = sequential_transition_split(bundle.num_snapshots, config.dyn_train_ratio)
     latent_tensor = torch.from_numpy(latents.astype(np.float32)).to(device)
     model = LatentDynamicsMLP(config.latent_dim, config.dynamics_hidden_dim, config.dynamics_depth).to(device)
-    optimizer = AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
-    history = {"train_loss": [], "val_loss": [], "val_one_step_loss": [], "val_rollout_loss": []}
+    optimizer = AdamW(model.parameters(), lr=config.dyn_learning_rate, weight_decay=config.weight_decay)
+    scheduler = _build_scheduler(
+        config.dyn_scheduler,
+        optimizer,
+        config.dyn_scheduler_factor,
+        config.dyn_scheduler_patience,
+        config.dyn_min_learning_rate,
+    )
+    history = {"train_loss": [], "val_loss": [], "val_one_step_loss": [], "val_rollout_loss": [], "learning_rate": []}
     best_state = copy.deepcopy(model.state_dict())
     best_loss = float("inf")
     patience = 0
@@ -255,6 +322,9 @@ def _train_dynamics(
         history["val_loss"].append(val_loss.item())
         history["val_one_step_loss"].append(val_one_step.item())
         history["val_rollout_loss"].append(val_rollout.item())
+        if scheduler is not None:
+            scheduler.step(val_loss.item())
+        history["learning_rate"].append(float(optimizer.param_groups[0]["lr"]))
         if val_loss.item() < best_loss:
             best_loss = val_loss.item()
             best_state = copy.deepcopy(model.state_dict())
@@ -265,7 +335,11 @@ def _train_dynamics(
                 break
     dyn_seconds = time.perf_counter() - start
     model.load_state_dict(best_state)
-    save_training_curves(history, output_dir / "dynamics_training_curves.png", "Latent dynamics training")
+    save_training_curves(
+        {key: value for key, value in history.items() if key != "learning_rate"},
+        output_dir / "dynamics_training_curves.png",
+        "Latent dynamics training",
+    )
 
     model.eval()
     rollout_latents = [latent_tensor[0].detach().cpu().numpy()]
@@ -275,6 +349,18 @@ def _train_dynamics(
             current = model(current)
             rollout_latents.append(current.squeeze(0).cpu().numpy())
     rollout_latents_np = np.stack(rollout_latents)
+    save_latent_trajectory_pca(
+        latents,
+        rollout_latents_np,
+        output_dir / "latent_pca_trajectory.png",
+        "Latent dynamics trajectory (PCA projection)",
+    )
+    save_latent_time_series(
+        latents,
+        rollout_latents_np,
+        output_dir / "latent_time_series.png",
+        "Latent coordinates vs time",
+    )
 
     autoencoder = autoencoder.to("cpu")
     model = model.to("cpu")
@@ -309,8 +395,15 @@ def _train_dynamics(
         "val_transition_indices": val_idx.tolist(),
         "history": history,
         "dyn_seconds": dyn_seconds,
+        "rollout_latents": rollout_latents_np.tolist(),
         "rollout_metrics": compare_metrics,
         "peak_memory_gb_after_dyn": peak_memory_gb,
+        "artifact_paths": {
+            "training_curves": "dynamics_training_curves.png",
+            "latent_pca_trajectory": "latent_pca_trajectory.png",
+            "latent_time_series": "latent_time_series.png",
+            "rollout_panels": [f"rollout_step_{step}.png" for step in config.compare_steps if step < bundle.num_snapshots],
+        },
     }
 
 
@@ -331,8 +424,8 @@ def run_nonlinear_pipeline(
     autoencoder, stats, ae_metrics, latents = _train_autoencoder(bundle, config, output_dir, device)
     dyn_metrics = _train_dynamics(latents, bundle, autoencoder, stats, config, output_dir, device)
     rollout_metrics = dyn_metrics["rollout_metrics"]
-    step_100 = rollout_metrics.get("step_100", {"nrmse": 0.0, "rmse": 0.0})
-    step_150 = rollout_metrics.get("step_150", {"nrmse": 0.0, "rmse": 0.0})
+    step_100 = rollout_metrics.get("step_100", {"mse": 0.0, "nrmse": 0.0, "rmse": 0.0})
+    step_150 = rollout_metrics.get("step_150", {"mse": 0.0, "nrmse": 0.0, "rmse": 0.0})
     overall_score = primary_score(ae_metrics["recon_nrmse"], step_100["nrmse"], step_150["nrmse"])
 
     metrics = {
@@ -344,12 +437,25 @@ def run_nonlinear_pipeline(
         "ae": ae_metrics,
         "dynamics": dyn_metrics,
         "primary_score": overall_score,
+        "recon_mse": ae_metrics["recon_mse"],
         "recon_rmse": ae_metrics["recon_rmse"],
         "recon_nrmse": ae_metrics["recon_nrmse"],
+        "mse_t100": step_100["mse"],
         "rmse_t100": step_100["rmse"],
+        "nrmse_t100": step_100["nrmse"],
+        "mse_t150": step_150["mse"],
         "rmse_t150": step_150["rmse"],
+        "nrmse_t150": step_150["nrmse"],
         "peak_memory_gb": max(ae_metrics["peak_memory_gb_after_ae"], dyn_metrics["peak_memory_gb_after_dyn"]),
         "wall_seconds": ae_metrics["ae_seconds"] + dyn_metrics["dyn_seconds"],
+        "artifacts": {
+            "ae_training_curves": "ae_training_curves.png",
+            "reconstruction_previews": ae_metrics["artifact_paths"]["reconstruction_previews"],
+            "dynamics_training_curves": "dynamics_training_curves.png",
+            "latent_pca_trajectory": dyn_metrics["artifact_paths"]["latent_pca_trajectory"],
+            "latent_time_series": dyn_metrics["artifact_paths"]["latent_time_series"],
+            "rollout_panels": dyn_metrics["artifact_paths"]["rollout_panels"],
+        },
     }
     write_json(output_dir / "metrics.json", metrics)
     torch.save(autoencoder.state_dict(), output_dir / "autoencoder.pt")

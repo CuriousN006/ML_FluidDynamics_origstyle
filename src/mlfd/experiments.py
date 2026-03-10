@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .config import AutoresearchConfig, ProjectPaths
 from .utils import short_git_commit, utc_timestamp
@@ -38,6 +38,7 @@ class ExperimentRecord:
     created_at: str
     failure_reason: str = ""
     next_hypothesis: str = ""
+    config_summary: tuple[str, ...] = field(default_factory=tuple)
 
 
 def init_results_file(paths: ProjectPaths) -> None:
@@ -126,6 +127,13 @@ def append_result(paths: ProjectPaths, record: ExperimentRecord) -> None:
 
 def write_experiment_markdown(paths: ProjectPaths, record: ExperimentRecord) -> None:
     path = paths.experiment_dir / f"exp-{record.experiment_id:04d}.md"
+    if record.config_summary:
+        changes_block = "\n".join(f"- {line}" for line in record.config_summary)
+    else:
+        changes_block = (
+            "- This entry records the current code snapshot and its measured metrics.\n"
+            "- Summarize the code or config changes for the next run beneath this bullet list."
+        )
     content = f"""# Experiment {record.experiment_id:04d}
 
 ## Metadata
@@ -141,8 +149,7 @@ def write_experiment_markdown(paths: ProjectPaths, record: ExperimentRecord) -> 
 
 ## Changes
 
-- This entry records the current code snapshot and its measured metrics.
-- Summarize the code or config changes for the next run beneath this bullet list.
+{changes_block}
 
 ## Execution Conditions
 
@@ -280,6 +287,7 @@ def build_record(
         created_at=utc_timestamp(),
         failure_reason=failure_reason,
         next_hypothesis=next_hypothesis,
+        config_summary=_summarize_config(metrics),
     )
 
 
@@ -288,3 +296,40 @@ def record_experiment(paths: ProjectPaths, record: ExperimentRecord) -> None:
     write_experiment_markdown(paths, record)
     refresh_state(paths)
     refresh_run_index(paths)
+
+
+def _summarize_config(metrics: dict[str, float]) -> tuple[str, ...]:
+    config = metrics.get("config", {})
+    if not config:
+        return ()
+    summary = [
+        f"field_name={config.get('field_name', 'n/a')}",
+        f"latent_dim={config.get('latent_dim', 'n/a')}",
+        f"ae_epochs={config.get('ae_epochs', 'n/a')}",
+        f"dyn_epochs={config.get('dyn_epochs', 'n/a')}",
+        f"ae_learning_rate={config.get('ae_learning_rate', 'n/a')}",
+        f"dyn_learning_rate={config.get('dyn_learning_rate', 'n/a')}",
+        f"ae_scheduler={config.get('ae_scheduler', 'n/a')}",
+        f"dyn_scheduler={config.get('dyn_scheduler', 'n/a')}",
+        f"latent_l1_weight={config.get('latent_l1_weight', 'n/a')}",
+        f"dyn_l2_weight={config.get('dyn_l2_weight', 'n/a')}",
+        f"rollout_loss_weight={config.get('rollout_loss_weight', 'n/a')}",
+        f"deterministic={config.get('deterministic', 'n/a')}",
+    ]
+    if config.get("ae_scheduler") == "plateau":
+        summary.extend(
+            [
+                f"ae_scheduler_factor={config.get('ae_scheduler_factor', 'n/a')}",
+                f"ae_scheduler_patience={config.get('ae_scheduler_patience', 'n/a')}",
+                f"ae_min_learning_rate={config.get('ae_min_learning_rate', 'n/a')}",
+            ]
+        )
+    if config.get("dyn_scheduler") == "plateau":
+        summary.extend(
+            [
+                f"dyn_scheduler_factor={config.get('dyn_scheduler_factor', 'n/a')}",
+                f"dyn_scheduler_patience={config.get('dyn_scheduler_patience', 'n/a')}",
+                f"dyn_min_learning_rate={config.get('dyn_min_learning_rate', 'n/a')}",
+            ]
+        )
+    return tuple(summary)

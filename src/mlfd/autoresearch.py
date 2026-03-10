@@ -22,9 +22,22 @@ def _default_command(
     ae_epochs: int | None = None,
     dyn_epochs: int | None = None,
     latent_dim: int | None = None,
+    ae_learning_rate: float | None = None,
+    dyn_learning_rate: float | None = None,
     rollout_loss_weight: float | None = None,
     dynamics_depth: int | None = None,
     dynamics_hidden_dim: int | None = None,
+    ae_scheduler: str | None = None,
+    dyn_scheduler: str | None = None,
+    ae_scheduler_factor: float | None = None,
+    dyn_scheduler_factor: float | None = None,
+    ae_scheduler_patience: int | None = None,
+    dyn_scheduler_patience: int | None = None,
+    ae_min_learning_rate: float | None = None,
+    dyn_min_learning_rate: float | None = None,
+    latent_l1_weight: float | None = None,
+    dyn_l2_weight: float | None = None,
+    deterministic: bool | None = None,
     device: str | None = None,
 ) -> list[str]:
     command = [sys.executable, "-m", "mlfd.run_nonlinear", "--output-tag", output_tag]
@@ -33,9 +46,23 @@ def _default_command(
     _append_optional(command, "--ae-epochs", ae_epochs)
     _append_optional(command, "--dyn-epochs", dyn_epochs)
     _append_optional(command, "--latent-dim", latent_dim)
+    _append_optional(command, "--ae-learning-rate", ae_learning_rate)
+    _append_optional(command, "--dyn-learning-rate", dyn_learning_rate)
     _append_optional(command, "--rollout-loss-weight", rollout_loss_weight)
     _append_optional(command, "--dynamics-depth", dynamics_depth)
     _append_optional(command, "--dynamics-hidden-dim", dynamics_hidden_dim)
+    _append_optional(command, "--ae-scheduler", ae_scheduler)
+    _append_optional(command, "--dyn-scheduler", dyn_scheduler)
+    _append_optional(command, "--ae-scheduler-factor", ae_scheduler_factor)
+    _append_optional(command, "--dyn-scheduler-factor", dyn_scheduler_factor)
+    _append_optional(command, "--ae-scheduler-patience", ae_scheduler_patience)
+    _append_optional(command, "--dyn-scheduler-patience", dyn_scheduler_patience)
+    _append_optional(command, "--ae-min-learning-rate", ae_min_learning_rate)
+    _append_optional(command, "--dyn-min-learning-rate", dyn_min_learning_rate)
+    _append_optional(command, "--latent-l1-weight", latent_l1_weight)
+    _append_optional(command, "--dyn-l2-weight", dyn_l2_weight)
+    if deterministic is not None:
+        _append_optional(command, "--deterministic", str(deterministic).lower())
     _append_optional(command, "--device", device)
     return command
 
@@ -74,9 +101,22 @@ def main() -> None:
     run_parser.add_argument("--ae-epochs", type=int, default=None)
     run_parser.add_argument("--dyn-epochs", type=int, default=None)
     run_parser.add_argument("--latent-dim", type=int, default=None)
+    run_parser.add_argument("--ae-learning-rate", type=float, default=None)
+    run_parser.add_argument("--dyn-learning-rate", type=float, default=None)
     run_parser.add_argument("--rollout-loss-weight", type=float, default=None)
     run_parser.add_argument("--dynamics-depth", type=int, default=None)
     run_parser.add_argument("--dynamics-hidden-dim", type=int, default=None)
+    run_parser.add_argument("--ae-scheduler", choices=["none", "plateau"], default=None)
+    run_parser.add_argument("--dyn-scheduler", choices=["none", "plateau"], default=None)
+    run_parser.add_argument("--ae-scheduler-factor", type=float, default=None)
+    run_parser.add_argument("--dyn-scheduler-factor", type=float, default=None)
+    run_parser.add_argument("--ae-scheduler-patience", type=int, default=None)
+    run_parser.add_argument("--dyn-scheduler-patience", type=int, default=None)
+    run_parser.add_argument("--ae-min-learning-rate", type=float, default=None)
+    run_parser.add_argument("--dyn-min-learning-rate", type=float, default=None)
+    run_parser.add_argument("--latent-l1-weight", type=float, default=None)
+    run_parser.add_argument("--dyn-l2-weight", type=float, default=None)
+    run_parser.add_argument("--deterministic", choices=["true", "false"], default=None)
     run_parser.add_argument("--device", default=None)
 
     args = parser.parse_args()
@@ -98,9 +138,22 @@ def main() -> None:
         ae_epochs=args.ae_epochs,
         dyn_epochs=args.dyn_epochs,
         latent_dim=args.latent_dim,
+        ae_learning_rate=args.ae_learning_rate,
+        dyn_learning_rate=args.dyn_learning_rate,
         rollout_loss_weight=args.rollout_loss_weight,
         dynamics_depth=args.dynamics_depth,
         dynamics_hidden_dim=args.dynamics_hidden_dim,
+        ae_scheduler=args.ae_scheduler,
+        dyn_scheduler=args.dyn_scheduler,
+        ae_scheduler_factor=args.ae_scheduler_factor,
+        dyn_scheduler_factor=args.dyn_scheduler_factor,
+        ae_scheduler_patience=args.ae_scheduler_patience,
+        dyn_scheduler_patience=args.dyn_scheduler_patience,
+        ae_min_learning_rate=args.ae_min_learning_rate,
+        dyn_min_learning_rate=args.dyn_min_learning_rate,
+        latent_l1_weight=args.latent_l1_weight,
+        dyn_l2_weight=args.dyn_l2_weight,
+        deterministic=None if args.deterministic is None else args.deterministic == "true",
         device=args.device,
     )
     try:
