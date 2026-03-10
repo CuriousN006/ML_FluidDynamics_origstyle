@@ -10,6 +10,7 @@ class ConvAutoencoder(nn.Module):
         super().__init__()
         self.input_shape = input_shape
         self.latent_dim = latent_dim
+        self.latent_shape = (8, 4)
         self.encoder = nn.Sequential(
             nn.Conv2d(1, 16, kernel_size=3, stride=2, padding=1),
             nn.ReLU(inplace=True),
@@ -19,10 +20,9 @@ class ConvAutoencoder(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
             nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool2d((8, 4)),
         )
-        self.encoder_head = nn.Linear(64 * 8 * 4, latent_dim)
-        self.decoder_head = nn.Linear(latent_dim, 64 * 8 * 4)
+        self.encoder_head = nn.Linear(64 * self.latent_shape[0] * self.latent_shape[1], latent_dim)
+        self.decoder_head = nn.Linear(latent_dim, 64 * self.latent_shape[0] * self.latent_shape[1])
         self.decoder_blocks = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
@@ -35,10 +35,11 @@ class ConvAutoencoder(nn.Module):
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         encoded = self.encoder(x)
+        encoded = F.interpolate(encoded, size=self.latent_shape, mode="bilinear", align_corners=False)
         return self.encoder_head(encoded.flatten(start_dim=1))
 
     def decode(self, z: torch.Tensor) -> torch.Tensor:
-        hidden = self.decoder_head(z).view(-1, 64, 8, 4)
+        hidden = self.decoder_head(z).view(-1, 64, self.latent_shape[0], self.latent_shape[1])
         hidden = F.interpolate(hidden, scale_factor=2.0, mode="bilinear", align_corners=False)
         hidden = F.interpolate(hidden, scale_factor=2.0, mode="bilinear", align_corners=False)
         hidden = F.interpolate(hidden, scale_factor=2.0, mode="bilinear", align_corners=False)
