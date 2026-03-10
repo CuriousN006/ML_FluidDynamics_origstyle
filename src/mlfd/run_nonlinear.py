@@ -17,6 +17,24 @@ def main() -> None:
     parser.add_argument("--ae-epochs", type=int, default=None, help="Override autoencoder epochs.")
     parser.add_argument("--dyn-epochs", type=int, default=None, help="Override dynamics epochs.")
     parser.add_argument("--latent-dim", type=int, default=None, help="Override latent dimension.")
+    parser.add_argument(
+        "--rollout-loss-weight",
+        type=float,
+        default=None,
+        help="Override rollout loss weight in the latent dynamics model.",
+    )
+    parser.add_argument(
+        "--dynamics-depth",
+        type=int,
+        default=None,
+        help="Override the number of hidden layers in the latent dynamics MLP.",
+    )
+    parser.add_argument(
+        "--dynamics-hidden-dim",
+        type=int,
+        default=None,
+        help="Override the hidden width of the latent dynamics MLP.",
+    )
     parser.add_argument("--device", default=None, help="Explicit torch device.")
     args = parser.parse_args()
 
@@ -29,6 +47,12 @@ def main() -> None:
         config = _override(config, dyn_epochs=args.dyn_epochs)
     if args.latent_dim is not None:
         config = _override(config, latent_dim=args.latent_dim)
+    if args.rollout_loss_weight is not None:
+        config = _override(config, rollout_loss_weight=args.rollout_loss_weight)
+    if args.dynamics_depth is not None:
+        config = _override(config, dynamics_depth=args.dynamics_depth)
+    if args.dynamics_hidden_dim is not None:
+        config = _override(config, dynamics_hidden_dim=args.dynamics_hidden_dim)
     if args.device is not None:
         config = _override(config, device=args.device)
     metrics = run_nonlinear_pipeline(config, ProjectPaths(), output_tag=args.output_tag)

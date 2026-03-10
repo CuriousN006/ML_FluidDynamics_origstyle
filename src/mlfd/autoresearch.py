@@ -9,10 +9,34 @@ from .experiments import build_record, init_results_file, load_records, record_e
 from .utils import read_json
 
 
-def _default_command(output_tag: str, smoke: bool) -> list[str]:
+def _append_optional(command: list[str], flag: str, value: object | None) -> None:
+    if value is None:
+        return
+    command.extend([flag, str(value)])
+
+
+def _default_command(
+    output_tag: str,
+    smoke: bool,
+    *,
+    ae_epochs: int | None = None,
+    dyn_epochs: int | None = None,
+    latent_dim: int | None = None,
+    rollout_loss_weight: float | None = None,
+    dynamics_depth: int | None = None,
+    dynamics_hidden_dim: int | None = None,
+    device: str | None = None,
+) -> list[str]:
     command = [sys.executable, "-m", "mlfd.run_nonlinear", "--output-tag", output_tag]
     if smoke:
         command.append("--smoke")
+    _append_optional(command, "--ae-epochs", ae_epochs)
+    _append_optional(command, "--dyn-epochs", dyn_epochs)
+    _append_optional(command, "--latent-dim", latent_dim)
+    _append_optional(command, "--rollout-loss-weight", rollout_loss_weight)
+    _append_optional(command, "--dynamics-depth", dynamics_depth)
+    _append_optional(command, "--dynamics-hidden-dim", dynamics_hidden_dim)
+    _append_optional(command, "--device", device)
     return command
 
 
@@ -47,6 +71,13 @@ def main() -> None:
     run_parser.add_argument("--run-tag", default=ProjectPaths().run_tag)
     run_parser.add_argument("--smoke", action="store_true")
     run_parser.add_argument("--next-hypothesis", default="")
+    run_parser.add_argument("--ae-epochs", type=int, default=None)
+    run_parser.add_argument("--dyn-epochs", type=int, default=None)
+    run_parser.add_argument("--latent-dim", type=int, default=None)
+    run_parser.add_argument("--rollout-loss-weight", type=float, default=None)
+    run_parser.add_argument("--dynamics-depth", type=int, default=None)
+    run_parser.add_argument("--dynamics-hidden-dim", type=int, default=None)
+    run_parser.add_argument("--device", default=None)
 
     args = parser.parse_args()
     paths = ProjectPaths(run_tag=args.run_tag)
@@ -61,7 +92,17 @@ def main() -> None:
     config = AutoresearchConfig(run_tag=paths.run_tag)
     experiment_id = len(load_records(paths)) + 1
     output_tag = f"exp-{experiment_id:04d}"
-    command = _default_command(output_tag, args.smoke)
+    command = _default_command(
+        output_tag,
+        args.smoke,
+        ae_epochs=args.ae_epochs,
+        dyn_epochs=args.dyn_epochs,
+        latent_dim=args.latent_dim,
+        rollout_loss_weight=args.rollout_loss_weight,
+        dynamics_depth=args.dynamics_depth,
+        dynamics_hidden_dim=args.dynamics_hidden_dim,
+        device=args.device,
+    )
     try:
         metrics, log_path = _run_and_collect(paths, command, output_tag, config.timeout_seconds)
         failure_reason = ""
