@@ -21,11 +21,10 @@ minimize the `primary_score` written by `python -m mlfd.run_nonlinear`.
 
 ## Suggested Experiment Order
 
-1. Establish the baseline nonlinear run and log it.
-2. Explore latent dimension, regularization, and rollout loss changes.
-3. Explore encoder/decoder depth and residual connections.
-4. Explore latent dynamics width/depth and multi-step losses.
-5. Only keep changes that improve `primary_score`, or that preserve the score while reducing VRAM or complexity.
+1. Treat the current raw best as the working baseline. Right now that means the `latent_dim=24` variant.
+2. Explore latent dynamics width/depth and rollout loss changes around that baseline.
+3. Explore encoder/decoder residual refinements only if the small dynamics sweep stalls.
+4. Only keep changes that improve `primary_score`, or that preserve the score while reducing VRAM or complexity.
 
 ## Runtime Budget
 
@@ -50,4 +49,3 @@ Every experiment must update:
 4. `research/runs/20260310-fluid-rtx3070/index.md`
 
 Failures are first-class results and must stay recorded.
-

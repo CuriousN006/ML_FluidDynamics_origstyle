@@ -113,7 +113,7 @@ class LinearConfig:
 class NonlinearConfig:
     field_name: str = "VORTALL"
     seed: int = 42
-    latent_dim: int = 16
+    latent_dim: int = 24
     ae_epochs: int = 120
     dyn_epochs: int = 150
     batch_size: int = 16
@@ -150,4 +150,3 @@ class AutoresearchConfig:
     comparison_tolerance: float = 0.0025
     vram_reduction_threshold: float = 0.05
     baseline_description: str = "baseline convolutional AE + latent MLP"
-
