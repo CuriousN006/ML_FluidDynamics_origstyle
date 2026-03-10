@@ -33,6 +33,17 @@
 - exp-0029 | discard | score=0.154054 | Stage 4A: residual AE + residual linear dynamics with lower gradient loss weight
 - exp-0030 | discard | score=0.000835 | Stage 4B: residual AE + residual linear dynamics with shorter train rollout horizon
 - exp-0031 | discard | score=0.013512 | Stage 4C: portrait residual AE + residual linear dynamics with deterministic=false
+- exp-0032 | discard | score=234299.921330 | Stage 1 | wider residual AE with FFT loss
+- exp-0033 | crash | score=0.000000 | Stage 1 | residual_multiscale AE with CoordConv and light FFT loss
+- exp-0034 | discard | score=0.012891 | Stage 1 | residual AE with CoordConv and light FFT loss
+- exp-0035 | discard | score=1.526203 | AE search top-1 reevaluation | family=residual | latent=24 | width=1.375 | coordconv=False
+- exp-0036 | discard | score=0.000710 | AE search top-1 reevaluation | family=residual | latent=24 | width=1.000 | coordconv=False
+- exp-0037 | discard | score=0.000710 | AE search top-1 reevaluation | family=residual | latent=24 | width=1.000 | coordconv=False
+- exp-0038 | discard | score=0.068061 | AE search top-2 reevaluation | family=residual | latent=24 | width=1.000 | coordconv=True
+- exp-0039 | discard | score=0.013191 | Reg-0 | residual AE regularizer ablation
+- exp-0040 | discard | score=0.000709 | Reg-1 | latent-L1 only
+- exp-0041 | discard | score=0.013191 | Reg-2 | dyn-L2 only
+- exp-0042 | discard | score=0.000764 | Reg-4 | strong AE and dynamics regularization
 
 ## Best Model Changes
 

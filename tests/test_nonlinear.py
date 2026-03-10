@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 from mlfd.config import NonlinearConfig
-from mlfd.nonlinear import _dynamics_validation_terms, _latent_rollout_loss
+from mlfd.nonlinear import _dynamics_validation_terms, _latent_rollout_loss, compute_ae_score
 
 
 class IdentityDynamics(nn.Module):
@@ -32,3 +32,8 @@ def test_dynamics_validation_terms_include_rollout_component() -> None:
     assert torch.isclose(one_step, torch.tensor(0.0))
     assert torch.isclose(rollout, torch.tensor(0.0))
     assert torch.isclose(selection, torch.tensor(0.0))
+
+
+def test_compute_ae_score_weights_reconstruction_and_floor_terms() -> None:
+    score = compute_ae_score(0.1, 0.2, 0.3)
+    assert score == 0.175

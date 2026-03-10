@@ -30,3 +30,14 @@ dbffbf5	0.020998	0.635222	0.773933	0.748281	2.517	388.9	keep	parity rerun: deter
 4b4effd-dirty	0.154054	0.021953	2.247940	9.402636	1.724	357.8	discard	Stage 4A: residual AE + residual linear dynamics with lower gradient loss weight
 4b4effd-dirty	0.000835	0.025058	0.028385	0.031248	1.724	284.2	discard	Stage 4B: residual AE + residual linear dynamics with shorter train rollout horizon
 4b4effd-dirty	0.013512	0.022790	0.560361	0.598449	1.417	107.9	discard	Stage 4C: portrait residual AE + residual linear dynamics with deterministic=false
+290f90e-dirty	234299.921330	0.282102	16451.798200	16355090.013796	2.572	620.7	discard	Stage 1 | wider residual AE with FFT loss
+290f90e-dirty	0.000000	0.000000	0.000000	0.000000	0.000	720.0	crash	Stage 1 | residual_multiscale AE with CoordConv and light FFT loss
+290f90e-dirty	0.012891	0.076927	0.577476	0.523184	1.742	250.1	discard	Stage 1 | residual AE with CoordConv and light FFT loss
+290f90e-dirty	1.526203	0.320272	7.019797	102.259756	2.350	535.6	discard	AE search top-1 reevaluation | family=residual | latent=24 | width=1.375 | coordconv=False
+290f90e-dirty	0.000710	0.025058	0.026003	0.023945	1.724	300.8	discard	AE search top-1 reevaluation | family=residual | latent=24 | width=1.000 | coordconv=False
+290f90e-dirty	0.000710	0.025058	0.026003	0.023945	1.724	301.4	discard	AE search top-1 reevaluation | family=residual | latent=24 | width=1.000 | coordconv=False
+290f90e-dirty	0.068061	0.026591	1.991280	3.548426	1.742	294.5	discard	AE search top-2 reevaluation | family=residual | latent=24 | width=1.000 | coordconv=True
+290f90e-dirty	0.013191	0.024901	0.577240	0.565054	1.724	298.7	discard	Reg-0 | residual AE regularizer ablation
+290f90e-dirty	0.000709	0.025058	0.025909	0.023940	1.724	303.2	discard	Reg-1 | latent-L1 only
+290f90e-dirty	0.013191	0.024901	0.577243	0.565026	1.724	301.7	discard	Reg-2 | dyn-L2 only
+290f90e-dirty	0.000764	0.024994	0.026909	0.027200	1.724	441.9	discard	Reg-4 | strong AE and dynamics regularization

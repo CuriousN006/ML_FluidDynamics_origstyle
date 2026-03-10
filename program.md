@@ -26,9 +26,14 @@ Treat `exp-0028` as the reference model:
 
 - `layout=portrait`
 - `ae_architecture=residual`
+- `ae_width_mult=1.0`
+- `coordconv=False`
 - `dynamics_model=residual_linear`
 - `latent_dim=24`
 - `gradient_loss_weight=0.10`
+- `fft_loss_weight=0.0`
+- `latent_l1_weight=1e-4`
+- `dyn_l2_weight=1e-5`
 - `train_rollout_horizon=16`
 - `train_rollout_stride=8`
 - `validation_rollout_horizon=24`
@@ -50,15 +55,19 @@ Reference metrics:
 4. `gradient_loss_weight=0.05` is a bad regression. It preserves low AE loss but destroys rollout.
 5. `train_rollout_horizon=12` is slightly worse than `16`.
 6. `deterministic=False` is not safe for the portrait residual architecture, even if it lowers runtime.
+7. In the recovered pipeline, `latent_l1_weight=1e-4` matters more than `dyn_l2_weight=1e-5`. The no-regularizer and dyn-L2-only runs both collapse.
+8. Tested `CoordConv` and wider residual variants did not beat the recovered baseline.
+9. Tested `FFT` reconstruction weights above zero consistently hurt the residual baseline in the current search budget.
+10. The `residual_multiscale` family is implemented, but it exceeds the 12-minute runtime budget and is not the current default.
 
 ## Suggested Experiment Order
 
 1. Preserve `exp-0028` as the reference baseline and compare every new run directly against it.
 2. Do not revisit the old landscape MLP stack except for debugging.
 3. If more improvement is needed, try only small follow-ups on top of the portrait residual baseline:
-   - latent width
-   - scheduler that actually steps
-   - minor rollout-weight tuning
+   - cheaper AE-floor search around the current residual family
+   - lighter decoder refinements that do not break the runtime budget
+   - careful scheduler or learning-rate tuning after AE-only screening
 4. Only keep changes that improve `primary_score`, or that preserve the score while clearly lowering VRAM or runtime.
 
 ## Runtime Budget

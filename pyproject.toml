@@ -12,6 +12,7 @@ dependencies = [
     "imageio>=2.37.0",
     "matplotlib>=3.10.0",
     "numpy>=2.2.0",
+    "optuna>=4.4.0",
     "pandas>=2.2.0",
     "pillow>=11.1.0",
     "pytest>=8.4.0",
@@ -30,4 +31,3 @@ where = ["src"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
-

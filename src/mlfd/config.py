@@ -116,6 +116,8 @@ class NonlinearConfig:
     seed: int = 42
     latent_dim: int = 24
     ae_architecture: str = "residual"
+    ae_width_mult: float = 1.0
+    coordconv: bool = False
     dynamics_model: str = "residual_linear"
     ae_epochs: int = 160
     dyn_epochs: int = 260
@@ -126,6 +128,7 @@ class NonlinearConfig:
     latent_l1_weight: float = 1e-4
     dyn_l2_weight: float = 1e-5
     gradient_loss_weight: float = 0.1
+    fft_loss_weight: float = 0.0
     rollout_loss_weight: float = 0.15
     dynamics_hidden_dim: int = 64
     dynamics_depth: int = 2

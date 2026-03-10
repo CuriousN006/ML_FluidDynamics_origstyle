@@ -26,12 +26,15 @@ def apply_cli_overrides(config: NonlinearConfig, args: Namespace) -> NonlinearCo
     override_fields = {
         "layout": args.layout,
         "ae_architecture": args.ae_architecture,
+        "ae_width_mult": args.ae_width_mult,
+        "coordconv": args.coordconv,
         "dynamics_model": args.dynamics_model,
         "ae_epochs": args.ae_epochs,
         "dyn_epochs": args.dyn_epochs,
         "latent_dim": args.latent_dim,
         "rollout_loss_weight": args.rollout_loss_weight,
         "gradient_loss_weight": args.gradient_loss_weight,
+        "fft_loss_weight": args.fft_loss_weight,
         "dynamics_depth": args.dynamics_depth,
         "dynamics_hidden_dim": args.dynamics_hidden_dim,
         "train_rollout_stride": args.train_rollout_stride,
@@ -63,12 +66,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the nonlinear fluid dynamics baseline.")
     parser.add_argument("--output-tag", default="baseline", help="Subdirectory name under output/nonlinear.")
     parser.add_argument("--smoke", action="store_true", help="Run a very short smoke configuration.")
+    parser.add_argument("--ae-only", action="store_true", help="Train only the autoencoder and report AE-floor metrics.")
     parser.add_argument("--layout", choices=["landscape", "portrait"], default=None, help="Override frame layout.")
     parser.add_argument(
         "--ae-architecture",
-        choices=["baseline", "residual"],
+        choices=["baseline", "residual", "residual_multiscale"],
         default=None,
         help="Override the autoencoder architecture.",
+    )
+    parser.add_argument("--ae-width-mult", type=float, default=None, help="Override AE channel width multiplier.")
+    parser.add_argument(
+        "--coordconv",
+        type=_parse_bool,
+        default=None,
+        help="Override encoder CoordConv positional channels. Use true or false.",
     )
     parser.add_argument(
         "--dynamics-model",
@@ -92,6 +103,12 @@ def main() -> None:
         type=float,
         default=None,
         help="Override the reconstruction gradient loss weight.",
+    )
+    parser.add_argument(
+        "--fft-loss-weight",
+        type=float,
+        default=None,
+        help="Override the reconstruction FFT magnitude loss weight.",
     )
     parser.add_argument(
         "--dynamics-depth",
@@ -159,11 +176,15 @@ def main() -> None:
     args = parser.parse_args()
 
     config = apply_cli_overrides(NonlinearConfig(), args)
-    metrics = run_nonlinear_pipeline(config, ProjectPaths(), output_tag=args.output_tag)
+    metrics = run_nonlinear_pipeline(config, ProjectPaths(), output_tag=args.output_tag, ae_only=args.ae_only)
     print(f"primary_score: {metrics['primary_score']:.6f}")
+    if "ae_score" in metrics:
+        print(f"ae_score: {metrics['ae_score']:.6f}")
     print(f"recon_rmse: {metrics['recon_rmse']:.6f}")
-    print(f"rmse_t100: {metrics['rmse_t100']:.6f}")
-    print(f"rmse_t150: {metrics['rmse_t150']:.6f}")
+    if "rmse_t100" in metrics:
+        print(f"rmse_t100: {metrics['rmse_t100']:.6f}")
+    if "rmse_t150" in metrics:
+        print(f"rmse_t150: {metrics['rmse_t150']:.6f}")
     print(f"peak_memory_gb: {metrics['peak_memory_gb']:.3f}")
 
 

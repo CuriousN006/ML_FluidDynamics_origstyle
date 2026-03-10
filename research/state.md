@@ -9,20 +9,18 @@
 
 ## Recent Experiments
 
-- exp-0027: keep, score=0.001736, Stage 2: portrait baseline AE with residual linear dynamics
-- exp-0028: keep, score=0.000710, Stage 3: portrait residual autoencoder with residual linear dynamics
-- exp-0029: discard, score=0.154054, Stage 4A: residual AE + residual linear dynamics with lower gradient loss weight
-- exp-0030: discard, score=0.000835, Stage 4B: residual AE + residual linear dynamics with shorter train rollout horizon
-- exp-0031: discard, score=0.013512, Stage 4C: portrait residual AE + residual linear dynamics with deterministic=false
+- exp-0038: discard, score=0.068061, AE search top-2 reevaluation | family=residual | latent=24 | width=1.000 | coordconv=True
+- exp-0039: discard, score=0.013191, Reg-0 | residual AE regularizer ablation
+- exp-0040: discard, score=0.000709, Reg-1 | latent-L1 only
+- exp-0041: discard, score=0.013191, Reg-2 | dyn-L2 only
+- exp-0042: discard, score=0.000764, Reg-4 | strong AE and dynamics regularization
 
 ## Avoid Repeating
 
-- `gradient_loss_weight=0.05` caused rollout collapse in exp-0029.
-- `train_rollout_horizon=12` was slightly worse than the default in exp-0030.
-- `deterministic=False` destabilized the portrait residual stack in exp-0031.
+- Review discarded runs before retrying the same idea.
 
 ## Next Priorities
 
-1. Preserve `exp-0028` as the reference portrait baseline.
-2. If more optimization is needed, explore only small changes on top of the portrait residual stack.
-3. Keep the old landscape MLP pipeline closed unless it is needed for debugging.
+1. Inspect the latest discarded run and extract the lesson.
+2. Try the next highest-value architecture or regularization change.
+3. Update the long-form report after a meaningful improvement.

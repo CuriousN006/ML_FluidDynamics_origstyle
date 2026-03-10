@@ -10,7 +10,9 @@ def test_apply_cli_overrides_updates_scheduler_and_regularizers() -> None:
     args = Namespace(
         smoke=False,
         layout="portrait",
-        ae_architecture="residual",
+        ae_architecture="residual_multiscale",
+        ae_width_mult=1.6,
+        coordconv=True,
         dynamics_model="residual_linear",
         ae_epochs=None,
         dyn_epochs=320,
@@ -19,6 +21,7 @@ def test_apply_cli_overrides_updates_scheduler_and_regularizers() -> None:
         dyn_learning_rate=2e-4,
         rollout_loss_weight=None,
         gradient_loss_weight=0.05,
+        fft_loss_weight=0.03,
         dynamics_depth=None,
         dynamics_hidden_dim=None,
         train_rollout_stride=6,
@@ -40,12 +43,15 @@ def test_apply_cli_overrides_updates_scheduler_and_regularizers() -> None:
     )
     config = apply_cli_overrides(NonlinearConfig(), args)
     assert config.layout == "portrait"
-    assert config.ae_architecture == "residual"
+    assert config.ae_architecture == "residual_multiscale"
+    assert config.ae_width_mult == 1.6
+    assert config.coordconv is True
     assert config.dynamics_model == "residual_linear"
     assert config.dyn_epochs == 320
     assert config.ae_learning_rate == 5e-4
     assert config.dyn_learning_rate == 2e-4
     assert config.gradient_loss_weight == 0.05
+    assert config.fft_loss_weight == 0.03
     assert config.train_rollout_stride == 6
     assert config.train_rollout_horizon == 12
     assert config.validation_rollout_stride == 3

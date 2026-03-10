@@ -92,6 +92,32 @@ def _gradient_l1(prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor
     return F.l1_loss(pred_dx, true_dx) + F.l1_loss(pred_dy, true_dy)
 
 
+def _fft_magnitude_l1(prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    pred_fft = torch.fft.rfftn(prediction, dim=(-2, -1))
+    target_fft = torch.fft.rfftn(target, dim=(-2, -1))
+    return F.l1_loss(torch.abs(pred_fft), torch.abs(target_fft))
+
+
+def _autoencoder_reconstruction_loss(
+    prediction: torch.Tensor,
+    target: torch.Tensor,
+    latent: torch.Tensor | None,
+    config: NonlinearConfig,
+) -> torch.Tensor:
+    loss = F.mse_loss(prediction, target)
+    if config.gradient_loss_weight > 0.0:
+        loss = loss + (config.gradient_loss_weight * _gradient_l1(prediction, target))
+    if config.fft_loss_weight > 0.0:
+        loss = loss + (config.fft_loss_weight * _fft_magnitude_l1(prediction, target))
+    if latent is not None and config.latent_l1_weight > 0.0:
+        loss = loss + (config.latent_l1_weight * latent.abs().mean())
+    return loss
+
+
+def compute_ae_score(recon_rmse: float, floor_t100: float, floor_t150: float) -> float:
+    return float((0.5 * recon_rmse) + (0.25 * floor_t100) + (0.25 * floor_t150))
+
+
 def _build_loader(
     dataset: Dataset[torch.Tensor],
     batch_size: int,
@@ -198,7 +224,7 @@ def _evaluate_autoencoder(
     loader: DataLoader[torch.Tensor],
     device: torch.device,
     stats: NormalizationStats,
-    gradient_loss_weight: float,
+    config: NonlinearConfig,
 ) -> tuple[float, SnapshotMetricSummary, list[tuple[np.ndarray, np.ndarray]]]:
     model.eval()
     losses = []
@@ -207,7 +233,7 @@ def _evaluate_autoencoder(
         for batch in loader:
             batch = batch.to(device)
             recon, _ = model(batch)
-            loss = F.mse_loss(recon, batch) + (gradient_loss_weight * _gradient_l1(recon, batch))
+            loss = _autoencoder_reconstruction_loss(recon, batch, latent=None, config=config)
             losses.append(loss.item())
             truth = _denormalize(batch, stats).cpu().numpy()
             pred = _denormalize(recon, stats).cpu().numpy()
@@ -339,7 +365,13 @@ def _train_autoencoder(
     train_loader = _build_loader(train_dataset, config.batch_size, True, config.seed)
     test_loader = _build_loader(test_dataset, config.batch_size, False, config.seed + 1)
 
-    model = build_autoencoder((bundle.height, bundle.width), config.latent_dim, config.ae_architecture).to(device)
+    model = build_autoencoder(
+        (bundle.height, bundle.width),
+        config.latent_dim,
+        config.ae_architecture,
+        width_mult=config.ae_width_mult,
+        coordconv=config.coordconv,
+    ).to(device)
     optimizer = AdamW(model.parameters(), lr=config.ae_learning_rate, weight_decay=config.weight_decay)
     scheduler = _build_scheduler(
         config.ae_scheduler,
@@ -363,16 +395,12 @@ def _train_autoencoder(
         for batch in train_loader:
             batch = batch.to(device)
             recon, latent = model(batch)
-            loss = (
-                F.mse_loss(recon, batch)
-                + (config.gradient_loss_weight * _gradient_l1(recon, batch))
-                + (config.latent_l1_weight * latent.abs().mean())
-            )
+            loss = _autoencoder_reconstruction_loss(recon, batch, latent=latent, config=config)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
             batch_losses.append(loss.item())
-        val_loss, _, _ = _evaluate_autoencoder(model, test_loader, device, stats, config.gradient_loss_weight)
+        val_loss, _, _ = _evaluate_autoencoder(model, test_loader, device, stats, config)
         train_loss = float(np.mean(batch_losses))
         history["train_loss"].append(train_loss)
         history["val_loss"].append(val_loss)
@@ -390,7 +418,7 @@ def _train_autoencoder(
     ae_seconds = time.perf_counter() - start
     model.load_state_dict(best_state)
 
-    _, reconstruction_summary, preview_pairs = _evaluate_autoencoder(model, test_loader, device, stats, config.gradient_loss_weight)
+    _, reconstruction_summary, preview_pairs = _evaluate_autoencoder(model, test_loader, device, stats, config)
     save_training_curves(
         {key: value for key, value in history.items() if key != "learning_rate"},
         output_dir / "ae_training_curves.png",
@@ -597,6 +625,8 @@ def run_nonlinear_pipeline(
     config: NonlinearConfig | None = None,
     paths: ProjectPaths | None = None,
     output_tag: str = "baseline",
+    *,
+    ae_only: bool = False,
 ) -> dict[str, object]:
     config = config or NonlinearConfig()
     paths = paths or ProjectPaths()
@@ -613,13 +643,51 @@ def run_nonlinear_pipeline(
     autoencoder, stats, ae_metrics, latents, reconstructed_frames = _train_autoencoder(bundle, config, output_dir, device)
     ae_floor_metrics = _compute_step_metrics(bundle.frames, reconstructed_frames, compare_steps)
     ae_floor_artifacts = _save_step_artifacts("ae_floor", bundle.frames, reconstructed_frames, compare_steps, output_dir, config)
+    ae_floor_t100 = ae_floor_metrics.get("step_100", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
+    ae_floor_t150 = ae_floor_metrics.get("step_150", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
+    ae_score = compute_ae_score(ae_metrics["recon_rmse"], ae_floor_t100["rmse"], ae_floor_t150["rmse"])
+    if ae_only:
+        metrics = {
+            "created_at": utc_timestamp(),
+            "field_name": bundle.field_name,
+            "layout": config.layout,
+            "summary": bundle.summary(),
+            "config": asdict(config),
+            "device": str(device),
+            "screening_mode": "ae_only",
+            "ae": {**ae_metrics, "floor_metrics": ae_floor_metrics},
+            "ae_score": ae_score,
+            "primary_score": ae_score,
+            "recon_mse": ae_metrics["recon_mse"],
+            "recon_rmse": ae_metrics["recon_rmse"],
+            "recon_nrmse": ae_metrics["recon_nrmse"],
+            "ae_floor_mse_t100": ae_floor_t100["mse"],
+            "ae_floor_rmse_t100": ae_floor_t100["rmse"],
+            "ae_floor_nrmse_t100": ae_floor_t100["nrmse"],
+            "ae_floor_mse_t150": ae_floor_t150["mse"],
+            "ae_floor_rmse_t150": ae_floor_t150["rmse"],
+            "ae_floor_nrmse_t150": ae_floor_t150["nrmse"],
+            "peak_memory_gb": ae_metrics["peak_memory_gb_after_ae"],
+            "wall_seconds": ae_metrics["ae_seconds"],
+            "artifacts": {
+                "truth_portrait": "truth_portrait.png",
+                "truth_wake_zoom": "truth_wake_zoom.png",
+                "ae_training_curves": "ae_training_curves.png",
+                "reconstruction_previews_full": ae_metrics["artifact_paths"]["reconstruction_previews_full"],
+                "reconstruction_previews_wake": ae_metrics["artifact_paths"]["reconstruction_previews_wake"],
+                "ae_floor_full": ae_floor_artifacts["full"],
+                "ae_floor_wake": ae_floor_artifacts["wake"],
+            },
+        }
+        write_json(output_dir / "metrics.json", metrics)
+        torch.save(autoencoder.state_dict(), output_dir / "autoencoder.pt")
+        return metrics
+
     dyn_metrics = _train_dynamics(latents, bundle, autoencoder, stats, config, output_dir, device)
     rollout_metrics = dyn_metrics["rollout_metrics"]
     linear_metrics = dyn_metrics["linear_baseline_metrics"]
     step_100 = rollout_metrics.get("step_100", {"mse": 0.0, "nrmse": 0.0, "rmse": 0.0})
     step_150 = rollout_metrics.get("step_150", {"mse": 0.0, "nrmse": 0.0, "rmse": 0.0})
-    ae_floor_t100 = ae_floor_metrics.get("step_100", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
-    ae_floor_t150 = ae_floor_metrics.get("step_150", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
     linear_t100 = linear_metrics.get("step_100", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
     linear_t150 = linear_metrics.get("step_150", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
     overall_score = primary_score(ae_metrics["recon_nrmse"], step_100["nrmse"], step_150["nrmse"])
@@ -633,6 +701,7 @@ def run_nonlinear_pipeline(
         "device": str(device),
         "ae": {**ae_metrics, "floor_metrics": ae_floor_metrics},
         "dynamics": dyn_metrics,
+        "ae_score": ae_score,
         "primary_score": overall_score,
         "recon_mse": ae_metrics["recon_mse"],
         "recon_rmse": ae_metrics["recon_rmse"],

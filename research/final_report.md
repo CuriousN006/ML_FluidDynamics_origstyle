@@ -135,7 +135,8 @@ The AE floor at the project forecast targets is also low:
 - `AE floor RMSE @ t=100 = 0.024934`
 - `AE floor RMSE @ t=150 = 0.024278`
 
-This means the AE is no longer the dominant bottleneck.
+This means the latent-dynamics gap is largely closed. The remaining gap to the
+best DMD baseline is now mostly the AE floor itself.
 
 ## Future Prediction At t=100 And t=150
 
@@ -174,27 +175,77 @@ This conclusion is supported numerically by `exp-0028`:
 So the new residual dynamics not only stabilizes the orbit, it also beats the
 simple linear least-squares baseline on the same learned latent space.
 
+## AE Family Search After Recovery
+
+The next question after `exp-0028` was whether the recovered AE could be
+improved further while preserving the assignment-required reporting pipeline.
+This phase added:
+
+- a wider-channel AE option;
+- optional `CoordConv` encoder inputs;
+- an `FFT magnitude` reconstruction term;
+- a heavier `residual_multiscale` AE family;
+- an `AE-only` screening mode and Optuna/TPE search over AE hyperparameters.
+
+The empirical outcome was clear:
+
+- the recovered residual AE remained the best family under the tested budget;
+- `CoordConv` on top of the current residual baseline did not help;
+- larger width multipliers hurt reconstruction unless kept very close to the
+  original baseline width;
+- moderate-to-large `FFT` weights degraded the AE floor sharply;
+- the `residual_multiscale` family exceeded the 12-minute research budget
+  without showing an early advantage, so it was not promoted.
+
+The most important search result is `output/autoresearch/20260310-fluid-rtx3070/ae_search/residual-main/study_summary.json`.
+That study re-ran the recovered baseline as Trial 1 and confirmed it remained
+the best AE-only candidate:
+
+- Trial 1:
+  `ae_width_mult=1.0`, `coordconv=False`, `latent_dim=24`,
+  `gradient_loss_weight=0.10`, `fft_loss_weight=0.0`,
+  `latent_l1_weight=1e-4`, `ae_learning_rate=1e-3`
+- AE-only score:
+  `0.024832`
+- Reconstruction:
+  `recon_rmse=0.025058`
+- AE floor:
+  `rmse_t100=0.024934`, `rmse_t150=0.024278`
+
+The full reevaluation of that search winner reproduced the recovered baseline
+again in `exp-0037`, which matched `exp-0028` numerically.
+
 ## Effects Of Regularizer And Ablations
 
-The older regularizer ablation remains historically useful, but it is no longer
-the final word because the architecture and layout changed substantially in the
-portrait recovery phase.
+The regularizer discussion was rerun on the recovered portrait residual AE so
+that the answer matches the final architecture rather than the older
+pre-recovery model. The updated ablation is summarized in
+`research/regularizer_ablation.md`.
 
-The new local ablations show the more relevant lessons for the recovered model:
+| Label | Experiment | latent_l1_weight | dyn_l2_weight | primary_score | recon_rmse | rmse_t100 | rmse_t150 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Reg-0 | exp-0039 | 0 | 0 | 0.013191 | 0.091986 | 0.540997 | 0.500955 |
+| Reg-1 | exp-0040 | 1e-4 | 0 | 0.000709 | 0.025058 | 0.026003 | 0.023907 |
+| Reg-2 | exp-0041 | 0 | 1e-5 | 0.013191 | 0.091986 | 0.540997 | 0.500955 |
+| Reg-3 | exp-0037 | 1e-4 | 1e-5 | 0.000710 | 0.025058 | 0.026003 | 0.023945 |
+| Reg-4 | exp-0042 | 5e-4 | 5e-5 | 0.000764 | 0.025903 | 0.026463 | 0.024683 |
 
-- `gradient_loss_weight=0.10` is necessary. Lowering it to `0.05` in `exp-0029`
-  kept the AE floor low but caused catastrophic long-horizon rollout.
-- `train_rollout_horizon=16` is better than `12`. The shorter horizon in
-  `exp-0030` was still good, but it did not beat the default.
-- `deterministic=False` is not safe for this recovered architecture. `exp-0031`
-  ran faster, but rollout quality collapsed badly.
+The conclusions changed compared with the older ablation:
 
-In short:
+- `latent_l1_weight=1e-4` is the key regularizer for the recovered model.
+  `Reg-1` almost exactly matches the recovered baseline.
+- `dyn_l2_weight` alone is not sufficient. `Reg-2` collapses back to the same
+  poor behavior as the fully unregularized `Reg-0`.
+- the default combined setting `Reg-3` is still safe and effectively tied with
+  `Reg-1`, so it remains a conservative default.
+- stronger regularization (`Reg-4`) causes mild underfitting: reconstruction and
+  rollout both worsen slightly.
 
-- gradient-aware reconstruction loss helps preserve the wake geometry that the
-  dynamics model needs;
-- longer rollout supervision is still useful;
-- the new architecture prefers deterministic training for stability.
+So the final answer for the assignment requirement is:
+
+- some regularization is necessary;
+- AE-side latent sparsity matters most in the current architecture;
+- stronger regularization can hurt by smoothing the wake too much.
 
 ## Final Comparison To The Old Best
 
@@ -222,7 +273,10 @@ best DMD solution.
 Highest-value next steps from this point are:
 
 - preserve `exp-0028` as the new reference baseline;
-- avoid repeating the failed changes from `exp-0029`, `exp-0030`, and `exp-0031`;
-- if more improvement is needed, test small latent-width or scheduler changes
-  on top of the portrait residual baseline rather than revisiting the old
-  landscape MLP stack.
+- preserve the recovered residual AE family rather than switching to the tested
+  wider, `CoordConv`, or `FFT`-weighted variants;
+- avoid repeating the failed changes from `exp-0029`, `exp-0030`, `exp-0031`,
+  `exp-0032`, `exp-0034`, and the bad AE-search trials;
+- if more improvement is needed, target the AE floor directly with a cheaper
+  reconstruction-only search or a lighter decoder redesign, rather than
+  revisiting the old landscape MLP stack.
