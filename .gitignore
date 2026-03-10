@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+output/
+run.log
+results.tsv.bak
+*.tmp
+
+# Local data and legacy image dumps
+CYLINDER_ALL.mat
+u_images/
+v_images/
+vol_images/
+Final_project_DL2025-5.pdf
+makeImagefile.ipynb
+

@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+
+from .config import AutoresearchConfig, ProjectPaths
+from .experiments import build_record, init_results_file, record_experiment
+from .utils import read_json
+
+
+def _default_command(output_tag: str, smoke: bool) -> list[str]:
+    command = [sys.executable, "-m", "mlfd.run_nonlinear", "--output-tag", output_tag]
+    if smoke:
+        command.append("--smoke")
+    return command
+
+
+def _run_and_collect(paths: ProjectPaths, command: list[str], output_tag: str, timeout_seconds: int) -> tuple[dict[str, float], str]:
+    log_dir = paths.run_log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{output_tag}.log"
+    metrics_path = paths.nonlinear_dir / output_tag / "metrics.json"
+    with log_path.open("w", encoding="utf-8") as handle:
+        subprocess.run(
+            command,
+            cwd=paths.root,
+            check=True,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            timeout=timeout_seconds,
+        )
+    if not metrics_path.exists():
+        raise FileNotFoundError(f"Expected metrics file not found: {metrics_path}")
+    return read_json(metrics_path), str(log_path.relative_to(paths.root))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Autoresearch helpers for experiment logging.")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    init_parser = subparsers.add_parser("init-run", help="Initialize the run directories and ledger.")
+    init_parser.add_argument("--run-tag", default=ProjectPaths().run_tag)
+
+    run_parser = subparsers.add_parser("run-current", help="Run the current nonlinear code and record the result.")
+    run_parser.add_argument("--description", default=AutoresearchConfig().baseline_description)
+    run_parser.add_argument("--run-tag", default=ProjectPaths().run_tag)
+    run_parser.add_argument("--smoke", action="store_true")
+    run_parser.add_argument("--next-hypothesis", default="")
+
+    args = parser.parse_args()
+    paths = ProjectPaths(run_tag=args.run_tag)
+    paths.ensure_directories()
+    init_results_file(paths)
+
+    if args.command == "init-run":
+        print(f"Initialized run scaffold for {paths.run_tag}")
+        print(f"Expected branch: {paths.branch_name}")
+        return
+
+    config = AutoresearchConfig(run_tag=paths.run_tag)
+    experiment_id = len(paths.results_tsv.read_text(encoding="utf-8").splitlines())
+    output_tag = f"exp-{experiment_id:04d}"
+    command = _default_command(output_tag, args.smoke)
+    try:
+        metrics, log_path = _run_and_collect(paths, command, output_tag, config.timeout_seconds)
+        failure_reason = ""
+        status = None
+    except Exception as exc:  # noqa: BLE001
+        metrics = {
+            "primary_score": 0.0,
+            "recon_rmse": 0.0,
+            "rmse_t100": 0.0,
+            "rmse_t150": 0.0,
+            "peak_memory_gb": 0.0,
+            "wall_seconds": float(config.timeout_seconds),
+        }
+        failure_reason = str(exc)
+        status = "crash"
+        log_path = str((paths.run_log_dir / f"{output_tag}.log").relative_to(paths.root))
+    record = build_record(
+        paths,
+        config,
+        metrics,
+        description=args.description,
+        status=status,
+        failure_reason=failure_reason,
+        next_hypothesis=args.next_hypothesis,
+        metrics_path=str((paths.nonlinear_dir / output_tag / "metrics.json").relative_to(paths.root)),
+        log_path=log_path,
+    )
+    record_experiment(paths, record)
+    print(f"Recorded exp-{record.experiment_id:04d}")
+    print(f"Status: {record.status}")
+    print(f"Primary score: {record.primary_score:.6f}")
+
+
+if __name__ == "__main__":
+    main()
