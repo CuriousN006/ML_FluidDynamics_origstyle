@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
 .DS_Store
 output/
 run.log
@@ -17,4 +18,3 @@ v_images/
 vol_images/
 Final_project_DL2025-5.pdf
 makeImagefile.ipynb
-
