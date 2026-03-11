@@ -1,5 +1,7 @@
 # Final Report
 
+> Status note (2026-03-11): This is the current overall reference report. Branch-local and global best is `exp-0051` in this worktree.
+
 ## Problem Definition
 
 This project models the 2D cylinder wake snapshots in `CYLINDER_ALL.mat` and

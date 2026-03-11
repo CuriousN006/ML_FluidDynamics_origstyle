@@ -2,6 +2,12 @@
 
 This file is the human-authored charter for autonomous research in this repo.
 
+## Worktree Scope
+
+- This is the active global-reference worktree as of 2026-03-11.
+- Branch-local and overall reference: `exp-0051` (`primary_score=0.000565`).
+- Sibling worktrees should not overwrite this reference unless they beat `exp-0051` on the fixed evaluation.
+
 ## Mission
 
 Improve nonlinear prediction quality for the cylinder wake project while keeping
@@ -22,7 +28,7 @@ minimize the `primary_score` written by `python -m mlfd.run_nonlinear`.
 
 ## Current Working Baseline
 
-Treat `exp-0051` as the reference model in this branch:
+Treat `exp-0051` as the reference model for this worktree and the current overall campaign:
 
 - `layout=portrait`
 - `ae_architecture=residual_refine`

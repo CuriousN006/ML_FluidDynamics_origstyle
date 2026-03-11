@@ -1,5 +1,11 @@
 # Research State
 
+## Scope Note
+
+- This is the active global-reference state file as of 2026-03-11.
+- Branch-local and overall best is `exp-0051` (`primary_score=0.000565`).
+- Sibling worktrees should treat this file as the current reference until they produce a confirmed win.
+
 ## Current Best
 
 - Experiment: exp-0051

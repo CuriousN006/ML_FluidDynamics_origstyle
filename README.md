@@ -38,11 +38,16 @@ py -3.12 -m venv .venv
 - `research/runs/<run-tag>/index.md` tracks campaign progress.
 - `research/final_report.md` is the long-form report that should cite experiments and metrics.
 
+## Current Worktree
+
+- Branch: `codex/autoresearch/20260311-fluid-rtx3070-latent-sweep`
+- Role: current nonlinear reference branch across the sibling worktrees.
+- Current best: `exp-0051` with `primary_score=0.000565`.
+- Preferred starting point for new AE-floor, decoder, or latent-space searches.
+
 ## Notes
 
 - The runtime assumes `CYLINDER_ALL.mat` is present in the repo root.
-- The git workflow uses a dedicated research branch. This bootstrap uses
-  `codex/autoresearch/20260310-fluid-rtx3070` to stay compatible with the local branch prefix policy.
+- Some sibling worktrees currently reuse `D:\Projects\ML_FluidDynamics\.venv`; if a side worktree has no local `.venv`, run that interpreter with `PYTHONPATH=<worktree>\src`.
 - Existing PNG dumps are treated as derived visualizations, not primary training data.
-- The current raw nonlinear baseline is centered on `latent_dim=24`,
-  `ae_epochs=160`, and `dyn_epochs=260`.
+- Current winning configuration: `residual_refine`, `latent_dim=32`, `latent_l1_weight=1e-4`, `rollout_loss_weight=0.15`.
