@@ -16,10 +16,33 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+function Get-AzCliCommand {
+    $candidates = @(
+        "az",
+        "az.cmd",
+        "C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd",
+        "C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd"
+    )
+
+    foreach ($candidate in $candidates) {
+        $command = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($null -ne $command) {
+            return $command.Source
+        }
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
+$script:AzCli = Get-AzCliCommand
+
 function Get-AzCliJson {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
-    $raw = & az @Arguments
+    $raw = & $script:AzCli @Arguments
     if ($LASTEXITCODE -ne 0) {
         throw "Azure CLI command failed: az $($Arguments -join ' ')"
     }
@@ -142,12 +165,12 @@ function Select-TargetPlacement {
     throw "No usable region/SKU combination was found in the configured priority list."
 }
 
-if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
+if (-not $script:AzCli) {
     throw "Azure CLI is not installed on this machine. Install Azure CLI, run 'az login', and rerun this script."
 }
 
 if ($SubscriptionId) {
-    & az account set --subscription $SubscriptionId | Out-Null
+    & $script:AzCli account set --subscription $SubscriptionId | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to set the requested subscription."
     }
@@ -169,7 +192,7 @@ $customData = $customData.Replace("__REPO_DIR__", $RepoDir)
 Set-Content -Path $customDataPath -Value $customData -Encoding utf8
 
 try {
-    & az group create --name $ResourceGroupName --location $placement.Location --output json | Out-Null
+    & $script:AzCli group create --name $ResourceGroupName --location $placement.Location --output json | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to create or refresh resource group $ResourceGroupName."
     }
@@ -190,7 +213,7 @@ try {
         "--output", "json"
     )
 
-    & az vm auto-shutdown --resource-group $ResourceGroupName --name $VmName --time $AutoShutdownTime --timezone $AutoShutdownTimezone | Out-Null
+    & $script:AzCli vm auto-shutdown --resource-group $ResourceGroupName --name $VmName --time $AutoShutdownTime --timezone $AutoShutdownTimezone | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "VM was created, but auto-shutdown configuration did not complete."
     }

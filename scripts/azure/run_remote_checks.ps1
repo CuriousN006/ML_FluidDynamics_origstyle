@@ -10,6 +10,27 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+function Get-AzCliCommand {
+    $candidates = @(
+        "az",
+        "az.cmd",
+        "C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd",
+        "C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd"
+    )
+
+    foreach ($candidate in $candidates) {
+        $command = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($null -ne $command) {
+            return $command.Source
+        }
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
 function Invoke-Remote {
     param([Parameter(Mandatory = $true)][string]$PublicIp, [Parameter(Mandatory = $true)][string]$CommandText)
 
@@ -19,14 +40,16 @@ function Invoke-Remote {
     }
 }
 
-if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
+$azCli = Get-AzCliCommand
+
+if (-not $azCli) {
     throw "Azure CLI is not installed."
 }
 if (-not (Get-Command ssh -ErrorAction SilentlyContinue)) {
     throw "ssh is not available on this machine."
 }
 
-$publicIp = (& az vm show -d --resource-group $ResourceGroupName --name $VmName --query publicIps --output tsv).Trim()
+$publicIp = (& $azCli vm show -d --resource-group $ResourceGroupName --name $VmName --query publicIps --output tsv).Trim()
 if (-not $publicIp) {
     throw "Could not resolve the VM public IP."
 }

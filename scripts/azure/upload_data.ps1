@@ -10,17 +10,40 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+function Get-AzCliCommand {
+    $candidates = @(
+        "az",
+        "az.cmd",
+        "C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd",
+        "C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd"
+    )
+
+    foreach ($candidate in $candidates) {
+        $command = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($null -ne $command) {
+            return $command.Source
+        }
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
+$azCli = Get-AzCliCommand
+
 if (-not (Test-Path $LocalDataFile)) {
     throw "Local data file not found: $LocalDataFile"
 }
-if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
+if (-not $azCli) {
     throw "Azure CLI is not installed."
 }
 if (-not (Get-Command scp -ErrorAction SilentlyContinue)) {
     throw "scp is not available on this machine."
 }
 
-$publicIp = (& az vm show -d --resource-group $ResourceGroupName --name $VmName --query publicIps --output tsv).Trim()
+$publicIp = (& $azCli vm show -d --resource-group $ResourceGroupName --name $VmName --query publicIps --output tsv).Trim()
 if (-not $publicIp) {
     throw "Could not resolve the VM public IP."
 }
