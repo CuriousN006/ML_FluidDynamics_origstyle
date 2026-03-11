@@ -51,3 +51,14 @@ py -3.12 -m venv .venv
 - Some sibling worktrees currently reuse `D:\Projects\ML_FluidDynamics\.venv`; if a side worktree has no local `.venv`, run that interpreter with `PYTHONPATH=<worktree>\src`.
 - Existing PNG dumps are treated as derived visualizations, not primary training data.
 - Current winning configuration: `residual_refine`, `latent_dim=32`, `latent_l1_weight=1e-4`, `rollout_loss_weight=0.15`.
+
+## Azure GPU Workflow
+
+- This sibling clone is the Azure-targeted workspace for the current `latent-sweep` reference branch.
+- Use [docs/azure_gpu_runbook.md](./docs/azure_gpu_runbook.md) for the end-to-end Azure provisioning flow.
+- Local helper scripts live under `scripts/azure/`:
+  - `check_prereqs.ps1`: validate `az`, `ssh`, `scp`, and Azure login state.
+  - `provision_vm.ps1`: pick the first usable region/SKU, create the resource group, and provision the VM.
+  - `upload_data.ps1`: copy `CYLINDER_ALL.mat` to the VM repo root.
+  - `run_remote_checks.ps1`: bootstrap the repo on the VM, run `mlfd.setup`, a smoke run, and the `azure-baseline` command.
+- Remote VM bootstrap uses `scripts/azure/bootstrap_repo.sh` after the VM is reachable over SSH.
