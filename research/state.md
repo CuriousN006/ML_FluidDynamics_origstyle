@@ -2,25 +2,27 @@
 
 ## Current Best
 
-- Experiment: exp-0046
-- Commit: c296c50-dirty
-- Primary score: 0.000613
-- Notes: Reg-1 | residual_refine regularizer ablation
+- Experiment: exp-0051
+- Commit: 26e4179-dirty
+- Primary score: 0.000565
+- Notes: Latent sweep Stage 2 | residual_refine latent=32 full rollout
 
 ## Recent Experiments
 
-- exp-0045: discard, score=0.000734, Reg-0 | residual_refine regularizer ablation
-- exp-0046: keep, score=0.000613, Reg-1 | residual_refine regularizer ablation
-- exp-0047: discard, score=0.000720, Reg-2 | residual_refine regularizer ablation
-- exp-0048: discard, score=0.000670, Reg-3 | residual_refine regularizer ablation
-- exp-0049: discard, score=0.092935, Reg-4 | residual_refine regularizer ablation
+- exp-0054: discard, score=0.000569, Latent sweep Stage 3 R3 | residual_refine latent=32 rollout_loss_weight=0.30
+- exp-0055: discard, score=0.001127, Reg-0 | latent32 residual_refine regularizer ablation
+- exp-0056: discard, score=0.000979, Reg-2 | latent32 residual_refine regularizer ablation
+- exp-0057: discard, score=0.000566, Reg-3 | latent32 residual_refine regularizer ablation
+- exp-0058: discard, score=0.242610, Reg-4 | latent32 residual_refine regularizer ablation
 
 ## Avoid Repeating
 
-- Review discarded runs before retrying the same idea.
+- Do not retry `latent_dim=48` on the current `residual_refine` branch.
+- Do not reopen `rollout_loss_weight` around `0.15` unless another architectural change shifts the optimum.
+- Strong regularization (`Reg-4`) is clearly off the table.
 
 ## Next Priorities
 
-1. Inspect the latest discarded run and extract the lesson.
-2. Try the next highest-value architecture or regularization change.
-3. Update the long-form report after a meaningful improvement.
+1. Preserve `exp-0051` as the new nonlinear reference for future branches.
+2. Target the remaining DMD gap with a decoder-side AE-floor improvement, not another dynamics-only tweak.
+3. Keep future screening cheap: AE-only first, then full rollout only for candidates that improve the floor.

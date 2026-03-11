@@ -20,105 +20,99 @@ The nonlinear pipeline stays aligned with the assignment requirements:
 The canonical field is `VORTALL`. The raw matrix shape is `(89351, 151)`, with
 metadata `nx=199`, `ny=449`, and `dt=0.2`.
 
-The first major recovery step was fixing the field layout. The original PNG
-export notebook reshapes each snapshot to `(449, 199)`, which gives the correct
-portrait view of the cylinder and wake. The earlier nonlinear pipeline used a
-landscape convention that was numerically consistent but physically hard to
-read.
-
-The nonlinear mainline now uses:
+The nonlinear pipeline now uses the physically correct portrait layout:
 
 - `layout=portrait`
-- portrait full-view comparison panels
-- portrait wake-zoom comparison panels
+- full portrait panels plus wake zoom panels
 - `RdBu_r` for ground truth and prediction
-- `magma` for the error panels
+- `magma` for error maps
 
-Representative artifacts for the final model now live under
-`output/nonlinear/exp-0046/`.
+This layout matches the original PNG export convention and makes the cylinder
+and wake visually interpretable without changing the underlying evaluation.
 
 ## Linear Baseline
 
-The linear baseline remains the reference for what is achievable on this
-dataset. The metrics are in `output/linear/baseline/metrics.json`.
+The linear reference remains the strongest comparison target on this dataset.
+The metrics are in `output/linear/baseline/metrics.json`.
 
 - Truncated rank-10 reconstruction:
-  `rmse(step_100)=0.02503`, `rmse(step_150)=0.02804`
+  - `rmse(step_100)=0.02503`
+  - `rmse(step_150)=0.02804`
 - Rank-10 linear latent rollout:
-  `rmse(step_100)=0.03521`, `rmse(step_150)=0.03575`
+  - `rmse(step_100)=0.03521`
+  - `rmse(step_150)=0.03575`
 - Best DMD rank:
-  `15`
+  - `15`
 - Best DMD rollout:
-  `rmse(step_100)=0.01742`, `rmse(step_150)=0.01817`
+  - `rmse(step_100)=0.01742`
+  - `rmse(step_150)=0.01817`
 
 The nonlinear model now clearly beats the rank-10 linear rollout and the
-rank-10 truncated reconstruction. The remaining target is the DMD baseline.
+rank-10 truncated reconstruction. The remaining target is the best DMD model.
 
 ## Nonlinear Recovery Timeline
 
-The earlier nonlinear line peaked at `exp-0021`, which still had a very large
-error:
+The earlier nonlinear line peaked at `exp-0021`, which was still far from the
+linear references:
 
 - `primary_score=0.020250`
 - `recon_rmse=0.615190`
 - `rmse_t100=0.730262`
 - `rmse_t150=0.730221`
 
-The portrait recovery phase produced a step-change improvement:
+The portrait recovery phase produced the main step change:
 
-1. `exp-0026` changed only the layout to portrait.
+1. `exp-0026` switched only to portrait layout.
    - `primary_score=0.001830`
    - `recon_rmse=0.060305`
    - `rmse_t100=0.060771`
    - `rmse_t150=0.067218`
-2. `exp-0027` kept the portrait layout and replaced the old dynamics with
-   residual linear latent dynamics.
+2. `exp-0027` kept portrait layout and replaced the old latent rollout with
+   residual linear dynamics.
    - `primary_score=0.001736`
    - `rmse_t100=0.053970`
    - `rmse_t150=0.064757`
 3. `exp-0028` kept the portrait layout and residual linear dynamics, then
-   replaced the old AE with the new residual convolutional AE.
+   upgraded the AE.
    - `primary_score=0.000710`
    - `recon_rmse=0.025058`
    - `rmse_t100=0.026003`
    - `rmse_t150=0.023945`
-
-The next improvement target was the AE floor. The new coarse-to-fine study kept
-the same dynamics and changed only the decoder family:
-
-4. `stage1-r1` introduced a lightweight coarse-to-fine decoder with a coarse
-   head and refine head.
-   - `ae_score=0.022065`
-   - `recon_rmse=0.022676`
-   - `ae_floor_rmse_t150=0.021234`
-5. `stage2-r5` kept that structure and widened only the refine branch.
-   - `ae_score=0.022144`
+4. `exp-0046` introduced the coarse-to-fine `residual_refine` decoder and the
+   best regularizer setting found on the latent-24 branch.
+   - `primary_score=0.000613`
    - `recon_rmse=0.024214`
-   - `ae_floor_rmse_t150=0.019441`
-6. `exp-0043` promoted `stage2-r5` to the full nonlinear pipeline.
-   - `primary_score=0.000670`
-   - `recon_rmse=0.024214`
-   - `rmse_t100=0.023006`
-   - `rmse_t150=0.023289`
-7. `exp-0044` tested the simpler refine head (`refine_channels_mult=1.0`).
-   - `primary_score=0.001285`
-   - `rmse_t100=0.038655`
-   - `rmse_t150=0.057520`
+   - `rmse_t100=0.022138`
+   - `rmse_t150=0.019868`
 
-This failure is important: good AE-only metrics are not enough if the learned
-latent is not rollout-friendly. The wider refine branch was necessary.
+The latent-sweep branch then tested whether the remaining error came from the
+24-dimensional bottleneck itself.
+
+AE-only screening:
+
+- reference parity (`exp-0050`):
+  - `ae_score=0.022144`
+  - `ae_floor_rmse_t150=0.019441`
+- `latent32-ae`:
+  - `ae_score=0.020140`
+  - `ae_floor_rmse_t150=0.018927`
+- `latent48-ae`:
+  - `ae_score=0.023270`
+  - `ae_floor_rmse_t150=0.022483`
+
+`latent_dim=32` was the only candidate worth promoting.
 
 ## Final Model Selection
 
-`exp-0046` is the current best nonlinear model.
+`exp-0051` is the current best nonlinear model in this branch.
 
-- `primary_score=0.000613`
-- `recon_mse=0.000593`
-- `recon_rmse=0.024214`
-- `rmse_t100=0.022138`
-- `rmse_t150=0.019868`
-- `peak_memory_gb=1.957`
-- `wall_seconds=518.0`
+- `primary_score=0.000565`
+- `recon_mse=0.000436`
+- `recon_rmse=0.020886`
+- `rmse_t100=0.020372`
+- `rmse_t150=0.018893`
+- `peak_memory_gb=1.964`
+- `wall_seconds=465.6`
 
 Its configuration is:
 
@@ -130,17 +124,18 @@ Its configuration is:
 - `refine_blocks=1`
 - `refine_channels_mult=1.25`
 - `dynamics_model=residual_linear`
-- `latent_dim=24`
+- `latent_dim=32`
 - `gradient_loss_weight=0.10`
 - `latent_l1_weight=1e-4`
 - `dyn_l2_weight=0`
+- `rollout_loss_weight=0.15`
 - `train_rollout_horizon=16`
 - `train_rollout_stride=8`
 - `validation_rollout_horizon=24`
 - `validation_rollout_stride=4`
 - `deterministic=True`
 
-The best metrics file is `output/nonlinear/exp-0046/metrics.json`.
+The best metrics file is `output/nonlinear/exp-0051/metrics.json`.
 
 ## 10% Test Reconstruction
 
@@ -148,113 +143,124 @@ The AE still uses the fixed random `90/10` split generated by seed `42`. The
 held-out reconstruction previews include both full portrait panels and wake-zoom
 panels.
 
-For `exp-0046`:
+For `exp-0051`:
 
-- test reconstruction `MSE = 0.000593`
-- test reconstruction `RMSE = 0.024214`
-- test reconstruction `NRMSE = 0.000693`
+- test reconstruction `MSE = 0.000436`
+- test reconstruction `RMSE = 0.020886`
+- test reconstruction `NRMSE = 0.000598`
 
 The AE floor at the required forecast targets is:
 
-- `AE floor RMSE @ t=100 = 0.020707`
-- `AE floor RMSE @ t=150 = 0.019441`
+- `AE floor RMSE @ t=100 = 0.019860`
+- `AE floor RMSE @ t=150 = 0.018927`
 
-This is a clear improvement over `exp-0028`, where the AE floor at `t=150` was
-`0.024278`.
+Relative to `exp-0046`, the latent-32 bottleneck lowers both held-out
+reconstruction error and the AE floor.
 
 ## Future Prediction At t=100 And t=150
 
 The final rollout panels live in:
 
-- `output/nonlinear/exp-0046/rollout_step_100_full.png`
-- `output/nonlinear/exp-0046/rollout_step_100_wake.png`
-- `output/nonlinear/exp-0046/rollout_step_150_full.png`
-- `output/nonlinear/exp-0046/rollout_step_150_wake.png`
+- `output/nonlinear/exp-0051/rollout_step_100_full.png`
+- `output/nonlinear/exp-0051/rollout_step_100_wake.png`
+- `output/nonlinear/exp-0051/rollout_step_150_full.png`
+- `output/nonlinear/exp-0051/rollout_step_150_wake.png`
 
-For `exp-0046`:
+For `exp-0051`:
 
-- `t=100`: `MSE = 0.000490`, `RMSE = 0.022138`, `NRMSE = 0.000634`
-- `t=150`: `MSE = 0.000395`, `RMSE = 0.019868`, `NRMSE = 0.000569`
+- `t=100`: `MSE = 0.000415`, `RMSE = 0.020372`, `NRMSE = 0.000584`
+- `t=150`: `MSE = 0.000357`, `RMSE = 0.018893`, `NRMSE = 0.000541`
 
-These predictions are substantially better than the older residual AE baseline
-and now beat the rank-10 truncated reconstruction at both evaluation times.
+This is the first nonlinear branch run that beats the `exp-0046` mainline at
+both required forecast times.
 
 ## Latent Dynamics Interpretation
 
-The current latent trajectory is both interpretable and stable:
+The current latent trajectory is smooth, cyclic, and stable in PCA space.
+Numerically, the dynamics is no longer the dominant bottleneck:
 
-- the encoded latent trajectory remains smooth and cyclic in PCA space;
-- the residual linear dynamics follows that orbit rather than drifting away;
-- the rollout error now stays close to the AE floor.
+- `AE floor RMSE @ t=150 = 0.018927`
+- `nonlinear rollout RMSE @ t=150 = 0.018893`
+- `linear-on-same-latent RMSE @ t=150 = 0.028147`
 
-This is supported numerically by `exp-0046`:
+This means the residual linear dynamics tracks the learned latent orbit well.
+The remaining gap to DMD is now mostly an AE representation gap, not a rollout
+instability gap.
 
-- `AE floor RMSE @ t=150 = 0.019441`
-- `nonlinear rollout RMSE @ t=150 = 0.019868`
-- `linear-on-same-latent RMSE @ t=150 = 0.025799`
+The latent sweep also showed that:
 
-So the current latent dynamics is no longer the dominant bottleneck. The
-remaining gap is mostly the AE reconstruction floor.
+- `latent_dim=32` improved the manifold enough to help both reconstruction and
+  rollout;
+- `latent_dim=48` over-expanded the bottleneck and hurt the AE floor;
+- changing `rollout_loss_weight` around the latent-32 winner did not improve the
+  result further.
 
 ## Effects Of Regularizer On Model Performance
 
-The regularizer discussion was rerun on the final coarse-to-fine architecture.
-The updated ablation is summarized in `research/regularizer_ablation.md`.
+The regularizer discussion was rerun on the latent-32 winner.
 
 | Label | Experiment | latent_l1_weight | dyn_l2_weight | primary_score | recon_rmse | rmse_t100 | rmse_t150 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Reg-0 | exp-0045 | 0 | 0 | 0.000734 | 0.022264 | 0.021074 | 0.029685 |
-| Reg-1 | exp-0046 | 1e-4 | 0 | 0.000613 | 0.024214 | 0.022138 | 0.019868 |
-| Reg-2 | exp-0047 | 0 | 1e-5 | 0.000720 | 0.022264 | 0.021016 | 0.028791 |
-| Reg-3 | exp-0048 | 1e-4 | 1e-5 | 0.000670 | 0.024214 | 0.023006 | 0.023289 |
-| Reg-4 | exp-0049 | 5e-4 | 5e-5 | 0.092935 | 0.021139 | 2.788586 | 4.809601 |
+| Reg-0 | exp-0055 | 0 | 0 | 0.001127 | 0.023670 | 0.040122 | 0.045211 |
+| Reg-1 | exp-0051 | 1e-4 | 0 | 0.000565 | 0.020886 | 0.020372 | 0.018893 |
+| Reg-2 | exp-0056 | 0 | 1e-5 | 0.000979 | 0.023670 | 0.031120 | 0.040230 |
+| Reg-3 | exp-0057 | 1e-4 | 1e-5 | 0.000566 | 0.020886 | 0.020433 | 0.018917 |
+| Reg-4 | exp-0058 | 5e-4 | 5e-5 | 0.242610 | 0.028399 | 5.320233 | 13.742015 |
 
-The conclusions are now clear:
+The conclusions are clear:
 
-- some regularization is still necessary;
-- `latent_l1_weight=1e-4` is the best regularizer for the final model;
-- `dyn_l2_weight` alone does not help enough and is not needed in the best run;
-- the combined setting is stable, but slightly worse than `latent L1` alone;
-- stronger regularization destroys long-horizon rollout even if the raw
-  reconstruction error looks small.
+- `latent_l1_weight=1e-4` remains essential;
+- `dyn_l2_weight` alone does not rescue rollout stability;
+- adding `dyn_l2_weight=1e-5` on top of `latent_l1_weight=1e-4` is safe but
+  slightly worse than `Reg-1`;
+- strong regularization causes severe underfitting and rollout collapse.
 
-This means regularization in the final architecture is primarily about rollout
-stability, not about minimizing one-step reconstruction.
+This satisfies the assignment requirement to discuss the regularizer effect on
+model performance using actual reconstruction and future-prediction numbers.
 
 ## Comparison To Linear Baselines
 
-Compared with the earlier nonlinear best `exp-0021`, the final `exp-0046`
-reduces every important error term by a wide margin:
+Compared with the earlier nonlinear best `exp-0021`, the branch best `exp-0051`
+reduces every major error term by a large margin:
 
-- `primary_score`: `0.020250 -> 0.000613`
-- `recon_rmse`: `0.615190 -> 0.024214`
-- `rmse_t100`: `0.730262 -> 0.022138`
-- `rmse_t150`: `0.730221 -> 0.019868`
+- `primary_score`: `0.020250 -> 0.000565`
+- `recon_rmse`: `0.615190 -> 0.020886`
+- `rmse_t100`: `0.730262 -> 0.020372`
+- `rmse_t150`: `0.730221 -> 0.018893`
+
+Compared with the nonlinear mainline `exp-0046`:
+
+- `primary_score`: `0.000613 -> 0.000565`
+- `recon_rmse`: `0.024214 -> 0.020886`
+- `rmse_t100`: `0.022138 -> 0.020372`
+- `rmse_t150`: `0.019868 -> 0.018893`
 
 Compared with the linear references:
 
 - better than rank-10 linear latent rollout:
-  `0.022138 / 0.019868` vs `0.035208 / 0.035746`
+  - `0.020372 / 0.018893` vs `0.035208 / 0.035746`
 - better than truncated rank-10 reconstruction:
-  `0.022138 / 0.019868` vs `0.025032 / 0.028041`
+  - `0.020372 / 0.018893` vs `0.025032 / 0.028041`
 - still behind best DMD:
-  `0.022138 / 0.019868` vs `0.017423 / 0.018166`
+  - `0.020372 / 0.018893` vs `0.017423 / 0.018166`
 
-So the nonlinear autoencoder model now beats every linear baseline except the
-best DMD solution, and the remaining DMD gap is small.
+So the nonlinear autoencoder model still trails the best DMD baseline, but the
+gap is now much smaller than before.
 
 ## Remaining Gap And Next Steps
 
-The current best model is strong enough for the assignment and now answers all
-five required reporting items with a single coherent pipeline.
+The latent sweep established a new nonlinear reference. The remaining gap to DMD
+is now narrow:
 
-The remaining gap is mostly to DMD, not to the older nonlinear line. The
-highest-value next steps from here are:
+- `t=100` gap: `0.020372 - 0.017423 = 0.002949`
+- `t=150` gap: `0.018893 - 0.018166 = 0.000727`
 
-- preserve `exp-0046` as the new reference baseline;
-- keep the coarse-to-fine `residual_refine` decoder and avoid regressing to the
-  simpler `R1` refine branch;
-- keep `latent_l1_weight=1e-4` and drop the unnecessary `dyn_l2_weight`;
-- if more improvement is needed, target the AE floor directly with a cheaper
-  reconstruction-only search or another lightweight decoder refinement, rather
-  than revisiting the old landscape MLP stack.
+The highest-value next steps from here are:
+
+- preserve `exp-0051` as the new nonlinear reference;
+- keep `latent_dim=32` and do not revisit `latent_dim=48` on this architecture;
+- keep `rollout_loss_weight=0.15`;
+- keep `latent_l1_weight=1e-4` and leave `dyn_l2_weight` at zero;
+- if more improvement is needed, target the AE floor directly with a new
+  decoder-side experiment rather than revisiting the already-solved dynamics
+  bottleneck.

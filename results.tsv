@@ -48,3 +48,12 @@ c296c50-dirty	0.000613	0.024214	0.022138	0.019868	1.957	518.0	keep	Reg-1 | resid
 c296c50-dirty	0.000720	0.022264	0.021016	0.028791	1.957	487.2	discard	Reg-2 | residual_refine regularizer ablation
 c296c50-dirty	0.000670	0.024214	0.023006	0.023289	1.957	516.2	discard	Reg-3 | residual_refine regularizer ablation
 c296c50-dirty	0.092935	0.021139	2.788586	4.809601	1.957	447.6	discard	Reg-4 | residual_refine regularizer ablation
+26e4179	0.000613	0.024214	0.022138	0.019868	1.957	506.3	discard	Latent sweep Stage 0 parity | residual_refine latent=24 baseline replay
+26e4179-dirty	0.000565	0.020886	0.020372	0.018893	1.964	465.6	keep	Latent sweep Stage 2 | residual_refine latent=32 full rollout
+26e4179-dirty	0.000567	0.020886	0.020425	0.019018	1.964	466.1	discard	Latent sweep Stage 3 R1 | residual_refine latent=32 rollout_loss_weight=0.10
+26e4179-dirty	0.000566	0.020886	0.020441	0.018917	1.964	461.0	discard	Latent sweep Stage 3 R2 | residual_refine latent=32 rollout_loss_weight=0.20
+26e4179-dirty	0.000569	0.020886	0.020783	0.018923	1.964	471.1	discard	Latent sweep Stage 3 R3 | residual_refine latent=32 rollout_loss_weight=0.30
+26e4179-dirty	0.001127	0.023670	0.040122	0.045211	1.964	508.1	discard	Reg-0 | latent32 residual_refine regularizer ablation
+26e4179-dirty	0.000979	0.023670	0.031120	0.040230	1.964	511.5	discard	Reg-2 | latent32 residual_refine regularizer ablation
+26e4179-dirty	0.000566	0.020886	0.020433	0.018917	1.964	465.9	discard	Reg-3 | latent32 residual_refine regularizer ablation
+26e4179-dirty	0.242610	0.028399	5.320233	13.742015	1.964	274.9	discard	Reg-4 | latent32 residual_refine regularizer ablation
