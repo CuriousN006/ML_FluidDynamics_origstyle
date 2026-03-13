@@ -55,6 +55,7 @@ Always trust the scope/status notes at the top of those files before reading the
 - Run this clone in original-style agentic loops: edit code under `src/` or `tests/`, execute `python -m mlfd.autoresearch apply-candidate --idea-key ...`, judge the result, and continue.
 - Use `python -m mlfd.autoresearch baseline-check` or `run-current` only for baseline/debug checks, not for normal candidate iteration.
 - Idea keys should use `lower_snake_case`; use `_vN` when the formulation changes materially.
+- Keep winner code history on the active campaign branch; checkpoint `results.tsv` and `research/` into the separate log worktree with `snapshot-logs`.
 - Treat `run-campaign` only as a bounded helper for unattended AE screening.
 
 ## Current Worktree

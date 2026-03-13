@@ -11,6 +11,7 @@ from mlfd.autoresearch import (
     _git_head_commit,
     _parse_family_cycle,
     _restore_discarded_candidate,
+    _snapshot_logs,
     _validate_idea_key,
     _run_campaign,
 )
@@ -32,6 +33,12 @@ def test_parse_family_cycle_validates_input() -> None:
         _parse_family_cycle("")
     with pytest.raises(ValueError):
         _parse_family_cycle("unknown")
+
+
+def test_project_paths_branch_names_use_campaign_and_log_prefixes(tmp_path: Path) -> None:
+    paths = ProjectPaths(root=tmp_path, run_tag="demo-run")
+    assert paths.branch_name == "campaign/demo-run"
+    assert paths.log_branch_name == "log/demo-run"
 
 
 def test_validate_idea_key_requires_lower_snake_case() -> None:
@@ -121,6 +128,32 @@ def test_registry_blocked_lines_include_phase_branch(tmp_path: Path) -> None:
     lines = blocked_lines(registry)
 
     assert any("phase_refine_phase_residual_v1" in line for line in lines)
+
+
+def test_snapshot_logs_commits_into_log_repo(tmp_path: Path) -> None:
+    root = tmp_path / "campaign"
+    log_root = tmp_path / "log"
+    root.mkdir()
+    log_root.mkdir()
+
+    (root / "CYLINDER_ALL.mat").write_text("stub", encoding="utf-8")
+    (root / "pyproject.toml").write_text("[project]\nname='tmp'\nversion='0.0.0'\n", encoding="utf-8")
+    (root / "results.tsv").write_text("commit\tprimary_score\n", encoding="utf-8")
+    (root / "research").mkdir()
+    (root / "research" / "state.md").write_text("# state\n", encoding="utf-8")
+
+    _init_git_repo(log_root)
+    (log_root / "results.tsv").write_text("commit\tprimary_score\n", encoding="utf-8")
+    (log_root / "research").mkdir()
+    (log_root / "research" / "state.md").write_text("# old\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=log_root, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=log_root, check=True, capture_output=True, text=True)
+
+    paths = ProjectPaths(root=root, run_tag="unit-test")
+    result = _snapshot_logs(paths, log_root, "logs: snapshot", push=False)
+
+    assert "results.tsv" in result or "research/state.md" in result
+    assert (log_root / "research" / "state.md").read_text(encoding="utf-8") == "# state\n"
 
 
 def test_run_campaign_stops_immediately_when_stop_file_exists(tmp_path: Path) -> None:

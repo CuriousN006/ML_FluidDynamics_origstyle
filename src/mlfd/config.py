@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Iterable
 
 
-DEFAULT_RUN_TAG = "20260310-fluid-rtx3070"
-DEFAULT_BRANCH_NAME = f"codex/autoresearch/{DEFAULT_RUN_TAG}"
+DEFAULT_RUN_TAG = "20260313-local-rtx3070"
+DEFAULT_BRANCH_NAME = f"campaign/{DEFAULT_RUN_TAG}"
 DEFAULT_SNAPSHOT_DT = 0.2
 
 
@@ -67,6 +67,17 @@ class ProjectPaths:
         return self.root / "results.tsv"
 
     @property
+    def default_log_worktree_dir(self) -> Path:
+        return self.root.parent / f"{self.root.name}_log"
+
+    @property
+    def log_sync_paths(self) -> tuple[str, ...]:
+        return (
+            "results.tsv",
+            "research",
+        )
+
+    @property
     def state_md(self) -> Path:
         return self.research_dir / "state.md"
 
@@ -88,7 +99,11 @@ class ProjectPaths:
 
     @property
     def branch_name(self) -> str:
-        return f"codex/autoresearch/{self.run_tag}"
+        return f"campaign/{self.run_tag}"
+
+    @property
+    def log_branch_name(self) -> str:
+        return f"log/{self.run_tag}"
 
     @property
     def runtime_git_ignored_paths(self) -> tuple[str, ...]:

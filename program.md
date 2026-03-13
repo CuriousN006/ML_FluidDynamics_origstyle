@@ -41,7 +41,7 @@ minimize the `primary_score` written by `python -m mlfd.run_nonlinear`.
    - `results.tsv`
    - `research/experiments/*.md`
    - `research/state.md`
-   - `research/runs/20260311-fluid-rtx3070-latent-sweep/index.md`
+   - `research/runs/20260313-local-rtx3070/index.md`
 4. Keep the linear pipeline stable unless a bug blocks baseline artifact generation.
 5. Keep the portrait layout and portrait comparison figures as the nonlinear default.
 
@@ -142,6 +142,7 @@ Idea keys should use `lower_snake_case`. Use a material version suffix such as `
 
 Use `python -m mlfd.autoresearch search-ae ...` or `run-campaign ...` only as helper tools for cheap AE-floor screening. They are not the main research loop. The main loop is still agent-driven code editing plus keep/discard judgment.
 Use `baseline-check` or `run-current` only for clean baseline validation or debugging.
+Use `snapshot-logs` periodically to checkpoint append-only experiment memory into the dedicated log branch/worktree without polluting the campaign code history.
 
 ## Keep/Discard Policy
 
@@ -173,6 +174,6 @@ Every experiment must update:
 1. `results.tsv`
 2. `research/experiments/exp-XXXX.md`
 3. `research/state.md`
-4. `research/runs/20260311-fluid-rtx3070-latent-sweep/index.md`
+4. `research/runs/20260313-local-rtx3070/index.md`
 
 Failures are first-class results and must stay recorded.

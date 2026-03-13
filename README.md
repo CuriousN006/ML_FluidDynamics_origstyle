@@ -32,6 +32,7 @@ py -3.12 -m venv .venv
 - `python -m mlfd.autoresearch apply-candidate`: commit the current code change, run it once, and automatically keep or discard it.
 - `python -m mlfd.autoresearch run-current`: execute and log the current code once without candidate keep/discard automation.
 - `python -m mlfd.autoresearch run-campaign`: keep running unattended AE-search rounds until `--max-rounds`, `--max-hours`, or a stop file ends the campaign.
+- `python -m mlfd.autoresearch snapshot-logs`: checkpoint `results.tsv` and `research/` into the dedicated log worktree branch.
 
 ## Research Memory
 
@@ -45,10 +46,17 @@ py -3.12 -m venv .venv
 
 ## Current Worktree
 
-- Branch: `codex/autoresearch/20260311-fluid-rtx3070-latent-sweep`
+- Branch: `campaign/20260313-local-rtx3070`
 - Role: isolated autonomous sandbox cloned from the nonlinear reference branch.
 - Imported reference: `exp-0051` with `primary_score=0.000565`.
 - Preferred local workspace for original-style agentic autoresearch before promoting anything back to sibling worktrees.
+
+## Git Workflow
+
+- `main`: stable scaffold and tooling branch.
+- Current checked-out branch: active campaign branch where winner code commits advance.
+- Separate `log/...` worktree: append-only experiment memory branch for `results.tsv` and `research/` checkpoints.
+- Use `snapshot-logs` periodically so code history stays clean while experiment memory remains preserved.
 
 ## Notes
 

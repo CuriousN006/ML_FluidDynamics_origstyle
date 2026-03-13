@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -269,6 +270,35 @@ def _restore_discarded_candidate(root: Path, base_commit: str, candidate_entries
         run_git(root, ["restore", "--source=HEAD", "--worktree", "--", *restore_paths], capture_output=True)
     if added_paths:
         run_git(root, ["clean", "-fd", "--", *added_paths], capture_output=True)
+
+
+def _copy_log_paths(paths: ProjectPaths, log_root: Path) -> None:
+    for relative in paths.log_sync_paths:
+        source = paths.root / relative
+        target = log_root / relative
+        if source.is_dir():
+            shutil.copytree(source, target, dirs_exist_ok=True)
+        elif source.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+
+
+def _snapshot_logs(paths: ProjectPaths, log_root: Path, message: str, push: bool) -> str:
+    if not log_root.exists():
+        raise RuntimeError(f"Log worktree does not exist: {log_root}")
+    repo_root = run_git(log_root, ["rev-parse", "--show-toplevel"]).stdout.strip()
+    if Path(repo_root).resolve() != log_root.resolve():
+        raise RuntimeError(f"Expected a standalone log worktree at {log_root}, got repo root {repo_root}")
+    _copy_log_paths(paths, log_root)
+    run_git(log_root, ["add", "--", *paths.log_sync_paths], capture_output=True)
+    status = run_git(log_root, ["status", "--short", "--", *paths.log_sync_paths]).stdout.strip()
+    if not status:
+        return "No log changes to commit."
+    run_git(log_root, ["commit", "-m", message], capture_output=True)
+    if push:
+        current_branch = run_git(log_root, ["branch", "--show-current"]).stdout.strip()
+        run_git(log_root, ["push", "-u", "origin", current_branch], capture_output=True)
+    return status
 
 
 def _sample_search_params(trial: object, family: str) -> dict[str, object]:
@@ -794,6 +824,15 @@ def main() -> None:
     campaign_parser.add_argument("--device", default=None)
     campaign_parser.add_argument("--stop-file", default=None, help="Optional explicit path for a campaign stop file.")
 
+    snapshot_parser = subparsers.add_parser(
+        "snapshot-logs",
+        help="Copy results.tsv and research/ into a dedicated log worktree branch and commit a checkpoint there.",
+    )
+    snapshot_parser.add_argument("--run-tag", default=ProjectPaths().run_tag)
+    snapshot_parser.add_argument("--log-root", default=None, help="Path to the separate log worktree.")
+    snapshot_parser.add_argument("--message", default=None, help="Optional commit message for the log snapshot.")
+    snapshot_parser.add_argument("--push", action="store_true", help="Push the log branch after committing the snapshot.")
+
     args = parser.parse_args()
     paths = ProjectPaths(run_tag=args.run_tag)
     paths.ensure_directories()
@@ -899,6 +938,14 @@ def main() -> None:
         print(f"Stop reason: {state['stop_reason']}")
         print(f"Rounds completed: {state['rounds_completed']}")
         print(f"Stop file: {state['stop_file']}")
+        return
+
+    if args.command == "snapshot-logs":
+        log_root = Path(args.log_root).resolve() if args.log_root else paths.default_log_worktree_dir
+        message = args.message or f"logs: snapshot {utc_timestamp()}"
+        status_text = _snapshot_logs(paths, log_root, message, args.push)
+        print(status_text)
+        print(f"Log worktree: {log_root}")
         return
 
     if args.command == "baseline-check":
