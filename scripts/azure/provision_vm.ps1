@@ -110,10 +110,16 @@ function Get-UsageEntry {
 function Get-RequiredVCpuCount {
     param([Parameter(Mandatory = $true)][string]$SkuName)
 
-    if ($SkuName -match "NC(\d+)") {
+    if ($SkuName -match "Standard_[A-Za-z]+(\d+)") {
         return [int]$Matches[1]
     }
     throw "Could not infer the vCPU count from SKU name: $SkuName"
+}
+
+function Test-IsGpuSku {
+    param([Parameter(Mandatory = $true)][string]$SkuName)
+
+    return $SkuName -match "Standard_N[CDV]"
 }
 
 function Get-AllowedLocationsFromPolicy {
@@ -220,20 +226,25 @@ function Get-PlacementCandidates {
             $familyAvailable = $null
             $regionalLimit = $null
             $familyLimit = $null
+            $needsGpuFamilyQuota = Test-IsGpuSku -SkuName $size
 
             if ($quotaInfoAvailable) {
                 $regionalAvailable = [int]$regionalEntry.limit - [int]$regionalEntry.currentValue
-                $familyAvailable = [int]$t4FamilyEntry.limit - [int]$t4FamilyEntry.currentValue
                 $regionalLimit = [int]$regionalEntry.limit
-                $familyLimit = [int]$t4FamilyEntry.limit
 
                 if ($regionalAvailable -lt $requiredVCpu) {
                     Write-Warning "Skipping $size in $location because only $regionalAvailable regional vCPUs are available."
                     continue
                 }
-                if ($familyAvailable -lt $requiredVCpu) {
-                    Write-Warning "Skipping $size in $location because only $familyAvailable NC/T4 family vCPUs are available."
-                    continue
+
+                if ($needsGpuFamilyQuota) {
+                    $familyAvailable = [int]$t4FamilyEntry.limit - [int]$t4FamilyEntry.currentValue
+                    $familyLimit = [int]$t4FamilyEntry.limit
+
+                    if ($familyAvailable -lt $requiredVCpu) {
+                        Write-Warning "Skipping $size in $location because only $familyAvailable NC/T4 family vCPUs are available."
+                        continue
+                    }
                 }
             }
 
@@ -258,6 +269,65 @@ function Get-PlacementCandidates {
     }
 
     return $candidates
+}
+
+function Ensure-ResourceGroupAtLocation {
+    param(
+        [Parameter(Mandatory = $true)][string]$ResourceGroupName,
+        [Parameter(Mandatory = $true)][string]$Location
+    )
+
+    $existsResult = Invoke-AzCliRaw -Arguments @(
+        "group", "exists",
+        "--name", $ResourceGroupName
+    )
+    if ($existsResult.ExitCode -ne 0) {
+        throw "Failed to check whether resource group $ResourceGroupName exists.`n$($existsResult.Text)"
+    }
+
+    $exists = (($existsResult.Stdout -join "") -match "true")
+    if (-not $exists) {
+        & $script:AzCli group create --name $ResourceGroupName --location $Location --output json | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to create resource group $ResourceGroupName in $Location."
+        }
+        return
+    }
+
+    $group = Get-AzCliJson -Arguments @(
+        "group", "show",
+        "--name", $ResourceGroupName,
+        "--output", "json"
+    )
+
+    if ($group.location -eq $Location) {
+        return
+    }
+
+    $resources = Get-AzCliJson -Arguments @(
+        "resource", "list",
+        "--resource-group", $ResourceGroupName,
+        "--output", "json"
+    )
+
+    if (@($resources).Count -gt 0) {
+        throw "Resource group $ResourceGroupName already exists in $($group.location) and is not empty. Delete or rename it before provisioning in $Location."
+    }
+
+    Write-Warning "Deleting empty resource group $ResourceGroupName in $($group.location) so it can be recreated in $Location."
+    $deleteResult = Invoke-AzCliRaw -Arguments @(
+        "group", "delete",
+        "--name", $ResourceGroupName,
+        "--yes"
+    )
+    if ($deleteResult.ExitCode -ne 0) {
+        throw "Failed to delete empty resource group $ResourceGroupName.`n$($deleteResult.Text)"
+    }
+
+    & $script:AzCli group create --name $ResourceGroupName --location $Location --output json | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to recreate resource group $ResourceGroupName in $Location."
+    }
 }
 
 if (-not $script:AzCli) {
@@ -301,10 +371,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 try {
     $resourceGroupLocation = $placements[0].Location
-    & $script:AzCli group create --name $ResourceGroupName --location $resourceGroupLocation --output json | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to create or refresh resource group $ResourceGroupName."
-    }
+    Ensure-ResourceGroupAtLocation -ResourceGroupName $ResourceGroupName -Location $resourceGroupLocation
 
     $placement = $null
     $vm = $null
