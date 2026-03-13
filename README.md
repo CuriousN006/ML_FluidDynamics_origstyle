@@ -35,6 +35,8 @@ py -3.12 -m venv .venv
 ## Research Memory
 
 - `results.tsv` is the machine-readable experiment ledger.
+- `research/idea_registry.md` is the compressed long-horizon idea memory.
+- `research/idea_registry.json` is the machine-readable version used for candidate blocking.
 - `research/experiments/*.md` keeps append-only experiment narratives.
 - `research/state.md` is the short external memory for the next agent turn.
 - `research/runs/<run-tag>/index.md` tracks campaign progress.
@@ -51,7 +53,7 @@ py -3.12 -m venv .venv
 
 - The runtime assumes `CYLINDER_ALL.mat` is present in the repo root.
 - This clone is intended as an isolated autonomous sandbox. Review local results here before importing anything back into the sibling worktrees.
-- The primary workflow in this clone is original-style agentic autoresearch: the coding agent edits the nonlinear code, uses `apply-candidate`, and repeats.
+- The primary workflow in this clone is original-style agentic autoresearch: the coding agent edits the nonlinear code, uses `apply-candidate --idea-key ...`, and repeats.
 - `apply-candidate` commits only `src/` and `tests/` changes, records the run, and restores the previous code automatically when the result is discarded or crashes.
 - `run-campaign` is a bounded helper for unattended AE-screening, not the main research workflow.
 - Some sibling worktrees currently reuse `D:\Projects\ML_FluidDynamics_Project\ML_FluidDynamics\.venv`; if a side worktree has no local `.venv`, run that interpreter with `PYTHONPATH=<worktree>\src`.

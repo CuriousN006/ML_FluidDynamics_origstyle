@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .config import AutoresearchConfig, ProjectPaths
 from .experiments import best_record, build_record, init_results_file, load_records, record_experiment
+from .idea_registry import check_idea_allowed, ensure_registry_files, load_registry
 from .utils import read_json, run_git, utc_timestamp, write_json
 
 SEARCH_FAMILIES = ("residual", "residual_refine", "residual_multiscale")
@@ -729,9 +730,11 @@ def main() -> None:
         help="Commit the current candidate code change, run it once, and automatically keep or discard it.",
     )
     candidate_parser.add_argument("--description", required=True)
+    candidate_parser.add_argument("--idea-key", required=True)
     candidate_parser.add_argument("--run-tag", default=ProjectPaths().run_tag)
     candidate_parser.add_argument("--next-hypothesis", default="")
     candidate_parser.add_argument("--commit-message", default=None)
+    candidate_parser.add_argument("--force-revisit-reason", default="")
     candidate_parser.add_argument("--smoke", action="store_true")
     candidate_parser.add_argument("--device", default=None)
     candidate_parser.add_argument(
@@ -770,6 +773,7 @@ def main() -> None:
     paths = ProjectPaths(run_tag=args.run_tag)
     paths.ensure_directories()
     init_results_file(paths)
+    ensure_registry_files(paths)
 
     if args.command == "init-run":
         print(f"Initialized run scaffold for {paths.run_tag}")
@@ -778,6 +782,8 @@ def main() -> None:
 
     if args.command == "apply-candidate":
         config = AutoresearchConfig(run_tag=paths.run_tag)
+        registry = load_registry(paths)
+        check_idea_allowed(registry, args.idea_key, force_revisit_reason=args.force_revisit_reason)
         candidate_entries, out_of_scope = _collect_candidate_changes(paths)
         if out_of_scope:
             raise RuntimeError(
@@ -793,7 +799,7 @@ def main() -> None:
                 config,
                 command=command,
                 output_tag=f"exp-{len(load_records(paths)) + 1:04d}",
-                description=args.description,
+                description=f"[idea:{args.idea_key}] {args.description}",
                 next_hypothesis=args.next_hypothesis,
             )
             print(f"Recorded exp-{record.experiment_id:04d}")
@@ -812,8 +818,12 @@ def main() -> None:
             config,
             command=command,
             output_tag=output_tag,
-            description=args.description,
-            next_hypothesis=args.next_hypothesis,
+            description=f"[idea:{args.idea_key}] {args.description}",
+            next_hypothesis=(
+                args.next_hypothesis
+                if not args.force_revisit_reason.strip()
+                else f"{args.next_hypothesis} | revisit_reason={args.force_revisit_reason}".strip(" |")
+            ),
         )
         if record.status != "keep":
             _restore_discarded_candidate(paths.root, base_commit, candidate_entries)

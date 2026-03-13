@@ -15,6 +15,7 @@ from mlfd.autoresearch import (
 )
 from mlfd.config import AutoresearchConfig, ProjectPaths
 from mlfd.experiments import build_record, init_results_file, load_records, record_experiment
+from mlfd.idea_registry import blocked_lines, check_idea_allowed, load_registry
 from mlfd.utils import short_git_commit
 
 
@@ -95,6 +96,24 @@ def test_short_git_commit_ignores_runtime_paths(tmp_path: Path) -> None:
 
     assert short_git_commit(tmp_path).endswith("-dirty")
     assert short_git_commit(tmp_path, ignored_paths=("results.tsv",)) == commit
+
+
+def test_registry_blocks_known_idea(tmp_path: Path) -> None:
+    paths = ProjectPaths(root=tmp_path, run_tag="unit-test")
+    paths.ensure_directories()
+    registry = load_registry(paths)
+
+    with pytest.raises(RuntimeError):
+        check_idea_allowed(registry, "phase_refine_phase_residual_v1")
+
+
+def test_registry_blocked_lines_include_phase_branch(tmp_path: Path) -> None:
+    paths = ProjectPaths(root=tmp_path, run_tag="unit-test")
+    paths.ensure_directories()
+    registry = load_registry(paths)
+    lines = blocked_lines(registry)
+
+    assert any("phase_refine_phase_residual_v1" in line for line in lines)
 
 
 def test_run_campaign_stops_immediately_when_stop_file_exists(tmp_path: Path) -> None:

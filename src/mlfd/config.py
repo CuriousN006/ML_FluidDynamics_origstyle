@@ -71,6 +71,14 @@ class ProjectPaths:
         return self.research_dir / "state.md"
 
     @property
+    def idea_registry_md(self) -> Path:
+        return self.research_dir / "idea_registry.md"
+
+    @property
+    def idea_registry_json(self) -> Path:
+        return self.research_dir / "idea_registry.json"
+
+    @property
     def final_report_md(self) -> Path:
         return self.research_dir / "final_report.md"
 

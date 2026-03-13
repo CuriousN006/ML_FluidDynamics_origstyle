@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import AutoresearchConfig, ProjectPaths
+from .idea_registry import blocked_lines, load_registry
 from .utils import short_git_commit, utc_timestamp
 
 
@@ -222,6 +223,8 @@ def refresh_state(paths: ProjectPaths) -> None:
     records = load_records(paths)
     best = best_record(records)
     recent = records[-5:]
+    registry = load_registry(paths)
+    blocked = blocked_lines(registry)
     lines = ["# Research State", "", "## Current Best", ""]
     if best is None:
         lines.extend(
@@ -249,6 +252,11 @@ def refresh_state(paths: ProjectPaths) -> None:
             )
     else:
         lines.append("- None yet.")
+    lines.extend(["", "## Blocked Ideas", ""])
+    if blocked:
+        lines.extend(f"- {line}" for line in blocked)
+    else:
+        lines.append("- None recorded.")
     lines.extend(["", "## Avoid Repeating", "", "- Review discarded runs before retrying the same idea.", "", "## Next Priorities", ""])
     if best is None:
         lines.extend(

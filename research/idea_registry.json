@@ -1,0 +1,95 @@
+{
+  "items": [
+    {
+      "family": "decoder",
+      "idea_key": "pixelshuffle_film_groupnorm_v1",
+      "revisit_only_if": "Only if the decoder formulation changes materially instead of retuning the same stack.",
+      "source_experiments": [
+        "exp-0001"
+      ],
+      "source_worktree": "ML_FluidDynamics_decoder_combo",
+      "status": "blocked",
+      "summary": "The current PixelShuffle/FiLM/GroupNorm decoder line is negative evidence in its tested form."
+    },
+    {
+      "family": "loss_recipe",
+      "idea_key": "ffl_wake_decoder_ft_v1",
+      "revisit_only_if": "Only if the loss contract changes materially.",
+      "source_experiments": [
+        "exp-0001"
+      ],
+      "source_worktree": "ML_FluidDynamics_loss_combo",
+      "status": "blocked",
+      "summary": "The tested FFL/wake/decoder-FT recipe is negative evidence in its current form."
+    },
+    {
+      "family": "phase_amplitude",
+      "idea_key": "phase_refine_phase_residual_v1",
+      "revisit_only_if": "Only if the formulation changes materially, such as decoder-side phase conditioning or a different phase objective.",
+      "source_experiments": [
+        "exp-0080",
+        "exp-0082"
+      ],
+      "source_worktree": "ML_FluidDynamics_phase_amplitude",
+      "status": "blocked",
+      "summary": "Explicit phase splitting alone was not enough; the v1 phase_refine + phase_residual line is negative evidence."
+    },
+    {
+      "family": "joint_training",
+      "idea_key": "joint_v2_decoder_curriculum_v1",
+      "revisit_only_if": "Only if the curriculum objective changes materially.",
+      "source_experiments": [
+        "exp-0068"
+      ],
+      "source_worktree": "ML_FluidDynamics_joint_v2",
+      "status": "blocked",
+      "summary": "Decoder-only curriculum 8 -> 16 -> 32 regressed badly enough to close the current formulation."
+    },
+    {
+      "family": "joint_training",
+      "idea_key": "joint_v2_teacher_anchor_v1",
+      "revisit_only_if": "Only if the teacher-anchor formulation changes materially.",
+      "source_experiments": [
+        "exp-0073"
+      ],
+      "source_worktree": "ML_FluidDynamics_joint_v2",
+      "status": "blocked",
+      "summary": "The first teacher-anchor setting collapsed and should not be retried as a near miss."
+    },
+    {
+      "family": "joint_training",
+      "idea_key": "joint_v2_alternating_refresh_v1",
+      "revisit_only_if": "Only if refresh mechanics change materially.",
+      "source_experiments": [
+        "exp-0075"
+      ],
+      "source_worktree": "ML_FluidDynamics_joint_v2",
+      "status": "blocked",
+      "summary": "The first linear-only alternating-refresh setting is negative evidence in its current form."
+    },
+    {
+      "family": "joint_training",
+      "idea_key": "joint_v2_ema_latent_stats_v1",
+      "revisit_only_if": "Only if the EMA formulation changes materially.",
+      "source_experiments": [
+        "exp-0077"
+      ],
+      "source_worktree": "ML_FluidDynamics_joint_v2",
+      "status": "blocked",
+      "summary": "EMA latent-stat stabilization regressed relative to the corrected control."
+    },
+    {
+      "family": "decoder_supervision",
+      "idea_key": "residual_target_supervision_v2",
+      "revisit_only_if": "Only if the supervision target or decoder contract changes materially.",
+      "source_experiments": [
+        "exp-0060"
+      ],
+      "source_worktree": "ML_FluidDynamics_residual_target_v2",
+      "status": "blocked",
+      "summary": "Residual-target supervision v2 cleared the AE gate but collapsed on promoted full rollout, so it is negative evidence."
+    }
+  ],
+  "updated_at": "2026-03-13T00:00:00Z",
+  "version": 1
+}

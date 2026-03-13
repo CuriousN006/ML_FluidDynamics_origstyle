@@ -15,7 +15,7 @@ human interrupts it.
 
 Before starting a new loop:
 
-1. Read `README.md`, `AGENTS.md`, `program.md`, `research/state.md`, and `research/final_report.md`.
+1. Read `README.md`, `AGENTS.md`, `program.md`, `research/idea_registry.md`, `research/state.md`, and `research/final_report.md`.
 2. Verify the environment with `python -m mlfd.setup`.
 3. Confirm `CYLINDER_ALL.mat` exists in the repo root.
 4. Confirm the current best imported reference is still `exp-0051`.
@@ -117,7 +117,7 @@ Loop until interrupted by the human:
 1. Read the latest research memory and identify the current best result.
 2. Form one concrete hypothesis.
 3. Edit the nonlinear code directly under `src/` or `tests/`.
-4. Run a single measured experiment with `apply-candidate`.
+4. Run a single measured experiment with `apply-candidate --idea-key ...`.
 5. Check the result against the current best.
 6. Keep the change if it wins, otherwise let `apply-candidate` restore the previous code and move on.
 7. Record the outcome in the normal research memory.
@@ -126,12 +126,13 @@ Loop until interrupted by the human:
 The primary command for a single fully logged candidate experiment is:
 
 ```powershell
-python -m mlfd.autoresearch apply-candidate --description "<what changed>" --next-hypothesis "<next idea>"
+python -m mlfd.autoresearch apply-candidate --idea-key "<idea family key>" --description "<what changed>" --next-hypothesis "<next idea>"
 ```
 
 `apply-candidate` is the closest equivalent to the original `autoresearch` philosophy in this sandbox:
 
 - it commits only the current candidate code edits
+- checks the idea registry before the run
 - runs one experiment
 - records the result
 - keeps the commit if it wins
