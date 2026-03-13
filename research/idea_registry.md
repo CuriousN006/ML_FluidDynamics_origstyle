@@ -2,6 +2,7 @@
 
 This file is the compressed long-horizon memory for idea families.
 Read this before opening a new candidate line.
+The canonical source of truth is `research/idea_registry.json`; this Markdown file is the generated view.
 
 ## pixelshuffle_film_groupnorm_v1
 

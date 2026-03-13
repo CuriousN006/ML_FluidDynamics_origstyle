@@ -28,15 +28,16 @@ py -3.12 -m venv .venv
 - `python -m mlfd.run_linear`: generate the linear baseline artifacts.
 - `python -m mlfd.run_nonlinear`: train/evaluate the nonlinear baseline.
 - `python -m mlfd.autoresearch init-run`: initialize a new research campaign.
+- `python -m mlfd.autoresearch baseline-check`: run one clean baseline/debug check without candidate keep/discard automation.
 - `python -m mlfd.autoresearch apply-candidate`: commit the current code change, run it once, and automatically keep or discard it.
-- `python -m mlfd.autoresearch run-current`: execute and log the current code as an experiment.
+- `python -m mlfd.autoresearch run-current`: execute and log the current code once without candidate keep/discard automation.
 - `python -m mlfd.autoresearch run-campaign`: keep running unattended AE-search rounds until `--max-rounds`, `--max-hours`, or a stop file ends the campaign.
 
 ## Research Memory
 
 - `results.tsv` is the machine-readable experiment ledger.
-- `research/idea_registry.md` is the compressed long-horizon idea memory.
-- `research/idea_registry.json` is the machine-readable version used for candidate blocking.
+- `research/idea_registry.json` is the canonical machine-readable idea memory.
+- `research/idea_registry.md` is the generated human-readable view used for onboarding.
 - `research/experiments/*.md` keeps append-only experiment narratives.
 - `research/state.md` is the short external memory for the next agent turn.
 - `research/runs/<run-tag>/index.md` tracks campaign progress.
@@ -54,19 +55,11 @@ py -3.12 -m venv .venv
 - The runtime assumes `CYLINDER_ALL.mat` is present in the repo root.
 - This clone is intended as an isolated autonomous sandbox. Review local results here before importing anything back into the sibling worktrees.
 - The primary workflow in this clone is original-style agentic autoresearch: the coding agent edits the nonlinear code, uses `apply-candidate --idea-key ...`, and repeats.
+- `run-current` and `baseline-check` are for baseline validation or debugging, not for the main research loop.
 - `apply-candidate` commits only `src/` and `tests/` changes, records the run, and restores the previous code automatically when the result is discarded or crashes.
+- Idea keys should use `lower_snake_case`. Use a material version suffix such as `_v1`, `_v2` when the formulation itself changes.
 - `run-campaign` is a bounded helper for unattended AE-screening, not the main research workflow.
 - Some sibling worktrees currently reuse `D:\Projects\ML_FluidDynamics_Project\ML_FluidDynamics\.venv`; if a side worktree has no local `.venv`, run that interpreter with `PYTHONPATH=<worktree>\src`.
 - Existing PNG dumps are treated as derived visualizations, not primary training data.
 - Current winning configuration: `residual_refine`, `latent_dim=32`, `latent_l1_weight=1e-4`, `rollout_loss_weight=0.15`.
-
-## Azure GPU Workflow
-
-- This sibling clone is the Azure-targeted workspace for the current `latent-sweep` reference branch.
-- Use [docs/azure_gpu_runbook.md](./docs/azure_gpu_runbook.md) for the end-to-end Azure provisioning flow.
-- Local helper scripts live under `scripts/azure/`:
-  - `check_prereqs.ps1`: validate `az`, `ssh`, `scp`, and Azure login state.
-  - `provision_vm.ps1`: pick the first usable region/SKU, create the resource group, and provision the VM.
-  - `upload_data.ps1`: copy `CYLINDER_ALL.mat` to the VM repo root.
-  - `run_remote_checks.ps1`: bootstrap the repo on the VM, run `mlfd.setup`, a smoke run, and the `azure-baseline` command.
-- Remote VM bootstrap uses `scripts/azure/bootstrap_repo.sh` after the VM is reachable over SSH.
+- This sandbox assumes local execution. Remote Azure GPU workflow is out of scope for this workspace.

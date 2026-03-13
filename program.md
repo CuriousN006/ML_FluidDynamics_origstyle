@@ -22,7 +22,7 @@ Before starting a new loop:
 5. If this sandbox has no local experiment history yet, run one clean baseline with:
 
 ```powershell
-python -m mlfd.autoresearch run-current --description "baseline import check" --next-hypothesis "Start the first real candidate change."
+python -m mlfd.autoresearch baseline-check --description "baseline import check" --next-hypothesis "Start the first real candidate change."
 ```
 
 After setup, enter the experiment loop and do not stop unless interrupted by the human.
@@ -129,6 +129,8 @@ The primary command for a single fully logged candidate experiment is:
 python -m mlfd.autoresearch apply-candidate --idea-key "<idea family key>" --description "<what changed>" --next-hypothesis "<next idea>"
 ```
 
+Idea keys should use `lower_snake_case`. Use a material version suffix such as `_v1`, `_v2`, `_v3` when the formulation itself changes.
+
 `apply-candidate` is the closest equivalent to the original `autoresearch` philosophy in this sandbox:
 
 - it commits only the current candidate code edits
@@ -139,6 +141,7 @@ python -m mlfd.autoresearch apply-candidate --idea-key "<idea family key>" --des
 - restores the previous code automatically if it loses or crashes
 
 Use `python -m mlfd.autoresearch search-ae ...` or `run-campaign ...` only as helper tools for cheap AE-floor screening. They are not the main research loop. The main loop is still agent-driven code editing plus keep/discard judgment.
+Use `baseline-check` or `run-current` only for clean baseline validation or debugging.
 
 ## Keep/Discard Policy
 

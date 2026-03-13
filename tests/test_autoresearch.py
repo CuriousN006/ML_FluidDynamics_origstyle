@@ -11,6 +11,7 @@ from mlfd.autoresearch import (
     _git_head_commit,
     _parse_family_cycle,
     _restore_discarded_candidate,
+    _validate_idea_key,
     _run_campaign,
 )
 from mlfd.config import AutoresearchConfig, ProjectPaths
@@ -31,6 +32,12 @@ def test_parse_family_cycle_validates_input() -> None:
         _parse_family_cycle("")
     with pytest.raises(ValueError):
         _parse_family_cycle("unknown")
+
+
+def test_validate_idea_key_requires_lower_snake_case() -> None:
+    assert _validate_idea_key("decoder_adapter_v2") == "decoder_adapter_v2"
+    with pytest.raises(RuntimeError):
+        _validate_idea_key("DecoderAdapterV2")
 
 
 def test_collect_candidate_changes_ignores_runtime_memory(tmp_path: Path) -> None:

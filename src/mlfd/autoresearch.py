@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 import time
@@ -12,6 +13,7 @@ from .idea_registry import check_idea_allowed, ensure_registry_files, load_regis
 from .utils import read_json, run_git, utc_timestamp, write_json
 
 SEARCH_FAMILIES = ("residual", "residual_refine", "residual_multiscale")
+IDEA_KEY_PATTERN = re.compile(r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
 
 
 def _normalize_relpath(path: str) -> str:
@@ -174,6 +176,16 @@ def _display_path(path: Path, root: Path) -> str:
         return str(path.relative_to(root))
     except ValueError:
         return str(path)
+
+
+def _validate_idea_key(idea_key: str) -> str:
+    normalized = idea_key.strip()
+    if not IDEA_KEY_PATTERN.fullmatch(normalized):
+        raise RuntimeError(
+            "Invalid idea key. Use lower_snake_case, for example "
+            "'phase_refine_phase_residual_v1' or 'decoder_adapter_v2'."
+        )
+    return normalized
 
 
 def _git_head_commit(root: Path) -> str:
@@ -679,7 +691,10 @@ def main() -> None:
     init_parser = subparsers.add_parser("init-run", help="Initialize the run directories and ledger.")
     init_parser.add_argument("--run-tag", default=ProjectPaths().run_tag)
 
-    run_parser = subparsers.add_parser("run-current", help="Run the current nonlinear code and record the result.")
+    run_parser = subparsers.add_parser(
+        "run-current",
+        help="Run the current nonlinear code once without candidate keep/discard automation. Use for baseline checks or debugging.",
+    )
     run_parser.add_argument("--description", default=AutoresearchConfig().baseline_description)
     run_parser.add_argument("--run-tag", default=ProjectPaths().run_tag)
     run_parser.add_argument("--smoke", action="store_true")
@@ -724,6 +739,16 @@ def main() -> None:
     run_parser.add_argument("--dyn-l2-weight", type=float, default=None)
     run_parser.add_argument("--deterministic", choices=["true", "false"], default=None)
     run_parser.add_argument("--device", default=None)
+
+    baseline_parser = subparsers.add_parser(
+        "baseline-check",
+        help="Run one clean baseline/debug check. This is an alias for run-current with simpler intent.",
+    )
+    baseline_parser.add_argument("--description", default="baseline import check")
+    baseline_parser.add_argument("--run-tag", default=ProjectPaths().run_tag)
+    baseline_parser.add_argument("--smoke", action="store_true")
+    baseline_parser.add_argument("--next-hypothesis", default="Start the first real candidate change.")
+    baseline_parser.add_argument("--device", default=None)
 
     candidate_parser = subparsers.add_parser(
         "apply-candidate",
@@ -783,7 +808,8 @@ def main() -> None:
     if args.command == "apply-candidate":
         config = AutoresearchConfig(run_tag=paths.run_tag)
         registry = load_registry(paths)
-        check_idea_allowed(registry, args.idea_key, force_revisit_reason=args.force_revisit_reason)
+        idea_key = _validate_idea_key(args.idea_key)
+        check_idea_allowed(registry, idea_key, force_revisit_reason=args.force_revisit_reason)
         candidate_entries, out_of_scope = _collect_candidate_changes(paths)
         if out_of_scope:
             raise RuntimeError(
@@ -799,7 +825,7 @@ def main() -> None:
                 config,
                 command=command,
                 output_tag=f"exp-{len(load_records(paths)) + 1:04d}",
-                description=f"[idea:{args.idea_key}] {args.description}",
+                description=f"[idea:{idea_key}] {args.description}",
                 next_hypothesis=args.next_hypothesis,
             )
             print(f"Recorded exp-{record.experiment_id:04d}")
@@ -818,7 +844,7 @@ def main() -> None:
             config,
             command=command,
             output_tag=output_tag,
-            description=f"[idea:{args.idea_key}] {args.description}",
+            description=f"[idea:{idea_key}] {args.description}",
             next_hypothesis=(
                 args.next_hypothesis
                 if not args.force_revisit_reason.strip()
@@ -873,6 +899,23 @@ def main() -> None:
         print(f"Stop reason: {state['stop_reason']}")
         print(f"Rounds completed: {state['rounds_completed']}")
         print(f"Stop file: {state['stop_file']}")
+        return
+
+    if args.command == "baseline-check":
+        config = AutoresearchConfig(run_tag=paths.run_tag)
+        output_tag = f"exp-{len(load_records(paths)) + 1:04d}"
+        command = _default_command(output_tag, args.smoke, device=args.device)
+        record = _execute_logged_run(
+            paths,
+            config,
+            command=command,
+            output_tag=output_tag,
+            description=args.description,
+            next_hypothesis=args.next_hypothesis,
+        )
+        print(f"Recorded exp-{record.experiment_id:04d}")
+        print(f"Status: {record.status}")
+        print(f"Primary score: {record.primary_score:.6f}")
         return
 
     config = AutoresearchConfig(run_tag=paths.run_tag)

@@ -96,6 +96,7 @@ def _render_markdown(payload: dict[str, Any]) -> str:
         "",
         "This file is the compressed long-horizon memory for idea families.",
         "Read this before opening a new candidate line.",
+        "The canonical source of truth is `research/idea_registry.json`; this Markdown file is the generated view.",
         "",
     ]
     for item in payload["items"]:
