@@ -4,9 +4,9 @@ This file is the human-authored charter for autonomous research in this repo.
 
 ## Worktree Scope
 
-- This is the active global-reference worktree as of 2026-03-11.
-- Branch-local and overall reference: `exp-0051` (`primary_score=0.000565`).
-- Sibling worktrees should not overwrite this reference unless they beat `exp-0051` on the fixed evaluation.
+- This is an isolated autonomous sandbox cloned from the 2026-03-11 global reference.
+- Imported reference: `exp-0051` (`primary_score=0.000565`).
+- Keep local wins here until they are reviewed and deliberately promoted back into the sibling worktrees.
 
 ## Mission
 
@@ -87,6 +87,7 @@ Reference metrics:
 - Hard timeout per experiment: 12 minutes.
 - Target runtime per experiment: 10 minutes.
 - Campaign budget: 1 baseline plus up to 24 additional trials.
+- For unattended local searches, prefer `python -m mlfd.autoresearch run-campaign` with a stop file over manually relaunching one experiment at a time.
 
 ## Keep/Discard Policy
 

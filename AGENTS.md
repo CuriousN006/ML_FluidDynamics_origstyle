@@ -54,9 +54,9 @@ Always trust the scope/status notes at the top of those files before reading the
 
 ## Current Worktree
 
-- Role: active global-reference worktree.
-- Branch-local and overall best as of 2026-03-11: `exp-0051` with `primary_score=0.000565`.
-- Start new serious nonlinear searches from this worktree unless there is a specific reason to inspect another branch.
+- Role: isolated autonomous sandbox cloned from the active global-reference worktree.
+- Imported reference as of 2026-03-11: `exp-0051` with `primary_score=0.000565`.
+- Keep local experiments here until they are reviewed and explicitly promoted back into the sibling worktrees.
 
 ## Environment Notes
 

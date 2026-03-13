@@ -29,6 +29,7 @@ py -3.12 -m venv .venv
 - `python -m mlfd.run_nonlinear`: train/evaluate the nonlinear baseline.
 - `python -m mlfd.autoresearch init-run`: initialize a new research campaign.
 - `python -m mlfd.autoresearch run-current`: execute and log the current code as an experiment.
+- `python -m mlfd.autoresearch run-campaign`: keep running unattended AE-search rounds until `--max-rounds`, `--max-hours`, or a stop file ends the campaign.
 
 ## Research Memory
 
@@ -48,6 +49,7 @@ py -3.12 -m venv .venv
 ## Notes
 
 - The runtime assumes `CYLINDER_ALL.mat` is present in the repo root.
+- This clone is intended as an isolated autonomous sandbox. Review local results here before importing anything back into the sibling worktrees.
 - Some sibling worktrees currently reuse `D:\Projects\ML_FluidDynamics_Project\ML_FluidDynamics\.venv`; if a side worktree has no local `.venv`, run that interpreter with `PYTHONPATH=<worktree>\src`.
 - Existing PNG dumps are treated as derived visualizations, not primary training data.
 - Current winning configuration: `residual_refine`, `latent_dim=32`, `latent_l1_weight=1e-4`, `rollout_loss_weight=0.15`.

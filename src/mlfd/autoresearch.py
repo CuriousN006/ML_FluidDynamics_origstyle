@@ -3,11 +3,14 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .config import AutoresearchConfig, ProjectPaths
-from .experiments import build_record, init_results_file, load_records, record_experiment
-from .utils import read_json, write_json
+from .experiments import best_record, build_record, init_results_file, load_records, record_experiment
+from .utils import read_json, utc_timestamp, write_json
+
+SEARCH_FAMILIES = ("residual", "residual_refine", "residual_multiscale")
 
 
 def _append_optional(command: list[str], flag: str, value: object | None) -> None:
@@ -129,12 +132,38 @@ def _search_dir(paths: ProjectPaths, study_name: str) -> Path:
     return directory
 
 
+def _campaign_dir(paths: ProjectPaths, campaign_name: str) -> Path:
+    directory = paths.run_log_dir / "campaigns" / campaign_name
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
 def _trial_output_tag(study_name: str, trial_number: int) -> str:
     return f"ae-search-{study_name}-trial-{trial_number:03d}"
 
 
 def _write_study_summary(directory: Path, payload: dict[str, object]) -> None:
     write_json(directory / "study_summary.json", payload)
+
+
+def _parse_family_cycle(raw: str) -> tuple[str, ...]:
+    families = [item.strip() for item in raw.split(",") if item.strip()]
+    if not families:
+        raise ValueError("Family cycle cannot be empty.")
+    invalid = [item for item in families if item not in SEARCH_FAMILIES]
+    if invalid:
+        raise ValueError(
+            f"Unsupported family in cycle: {', '.join(invalid)}. "
+            f"Expected one of: {', '.join(SEARCH_FAMILIES)}."
+        )
+    return tuple(families)
+
+
+def _display_path(path: Path, root: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
 
 
 def _sample_search_params(trial: object, family: str) -> dict[str, object]:
@@ -207,6 +236,309 @@ def _enqueue_warm_start_trials(study: object, family: str) -> None:
     study.enqueue_trial({**baseline_trial, "coordconv": True})
 
 
+def _run_search_ae(
+    paths: ProjectPaths,
+    config: AutoresearchConfig,
+    *,
+    study_name: str,
+    family: str,
+    trials: int,
+    top_k: int,
+    device: str | None,
+) -> dict[str, object]:
+    try:
+        import optuna
+    except ImportError as exc:  # pragma: no cover - exercised in runtime, not unit tests
+        raise RuntimeError("Optuna is required for search-ae. Install it in the project environment.") from exc
+
+    study_dir = _search_dir(paths, study_name)
+    trial_payloads: list[dict[str, object]] = []
+    sampler = optuna.samplers.TPESampler(seed=42)
+    study = optuna.create_study(direction="minimize", sampler=sampler)
+    _enqueue_warm_start_trials(study, family)
+
+    def objective(trial: optuna.trial.Trial) -> float:
+        params = _sample_search_params(trial, family)
+        output_tag = _trial_output_tag(study_name, trial.number + 1)
+        command = _default_command(
+            output_tag,
+            False,
+            ae_only=True,
+            layout=str(params["layout"]),
+            ae_architecture=str(params["ae_architecture"]),
+            ae_width_mult=float(params["ae_width_mult"]),
+            coordconv=bool(params["coordconv"]),
+            coarse_loss_weight=float(params.get("coarse_loss_weight", 0.25)),
+            coarse_blur_kernel=int(params.get("coarse_blur_kernel", 9)),
+            coarse_blur_sigma=float(params.get("coarse_blur_sigma", 2.0)),
+            refine_blocks=int(params.get("refine_blocks", 1)),
+            refine_channels_mult=float(params.get("refine_channels_mult", 1.0)),
+            latent_dim=int(params["latent_dim"]),
+            ae_learning_rate=float(params["ae_learning_rate"]),
+            gradient_loss_weight=float(params["gradient_loss_weight"]),
+            fft_loss_weight=float(params["fft_loss_weight"]),
+            latent_l1_weight=float(params["latent_l1_weight"]),
+            device=device,
+        )
+        try:
+            metrics, log_path = _run_and_collect(paths, command, output_tag, config.timeout_seconds)
+            ae_score = float(metrics["ae_score"])
+            payload = {
+                "trial_number": trial.number + 1,
+                "status": "ok",
+                "ae_score": ae_score,
+                "recon_rmse": float(metrics["recon_rmse"]),
+                "ae_floor_rmse_t100": float(metrics["ae_floor_rmse_t100"]),
+                "ae_floor_rmse_t150": float(metrics["ae_floor_rmse_t150"]),
+                "metrics_path": str((paths.nonlinear_dir / output_tag / "metrics.json").relative_to(paths.root)),
+                "log_path": log_path,
+                "params": params,
+            }
+        except Exception as exc:  # noqa: BLE001
+            ae_score = float("inf")
+            payload = {
+                "trial_number": trial.number + 1,
+                "status": "crash",
+                "ae_score": ae_score,
+                "recon_rmse": 0.0,
+                "ae_floor_rmse_t100": 0.0,
+                "ae_floor_rmse_t150": 0.0,
+                "metrics_path": str((paths.nonlinear_dir / output_tag / "metrics.json").relative_to(paths.root)),
+                "log_path": str((paths.run_log_dir / f"{output_tag}.log").relative_to(paths.root)),
+                "error": str(exc),
+                "params": params,
+            }
+        trial_payloads.append(payload)
+        _write_study_summary(
+            study_dir,
+            {
+                "study_name": study_name,
+                "family": family,
+                "trials_requested": trials,
+                "completed_trials": len(trial_payloads),
+                "best_ae_score": min((float(item["ae_score"]) for item in trial_payloads if item["status"] == "ok"), default=None),
+                "trials": trial_payloads,
+            },
+        )
+        return ae_score
+
+    study.optimize(objective, n_trials=trials)
+    top_trials = _collect_top_trials(trial_payloads, top_k)
+    reevaluated: list[dict[str, object]] = []
+    for rank, trial_payload in enumerate(top_trials, start=1):
+        params = dict(trial_payload["params"])
+        experiment_id = len(load_records(paths)) + 1
+        output_tag = f"exp-{experiment_id:04d}"
+        command = _default_command(
+            output_tag,
+            False,
+            layout=str(params["layout"]),
+            ae_architecture=str(params["ae_architecture"]),
+            ae_width_mult=float(params["ae_width_mult"]),
+            coordconv=bool(params["coordconv"]),
+            coarse_loss_weight=float(params.get("coarse_loss_weight", 0.25)),
+            coarse_blur_kernel=int(params.get("coarse_blur_kernel", 9)),
+            coarse_blur_sigma=float(params.get("coarse_blur_sigma", 2.0)),
+            refine_blocks=int(params.get("refine_blocks", 1)),
+            refine_channels_mult=float(params.get("refine_channels_mult", 1.0)),
+            dynamics_model="residual_linear",
+            latent_dim=int(params["latent_dim"]),
+            ae_learning_rate=float(params["ae_learning_rate"]),
+            gradient_loss_weight=float(params["gradient_loss_weight"]),
+            fft_loss_weight=float(params["fft_loss_weight"]),
+            latent_l1_weight=float(params["latent_l1_weight"]),
+            device=device,
+        )
+        try:
+            metrics, log_path = _run_and_collect(paths, command, output_tag, config.timeout_seconds)
+            failure_reason = ""
+            status = None
+        except Exception as exc:  # noqa: BLE001
+            metrics = {
+                "primary_score": 0.0,
+                "recon_rmse": 0.0,
+                "rmse_t100": 0.0,
+                "rmse_t150": 0.0,
+                "peak_memory_gb": 0.0,
+                "wall_seconds": float(config.timeout_seconds),
+            }
+            failure_reason = str(exc)
+            status = "crash"
+            log_path = str((paths.run_log_dir / f"{output_tag}.log").relative_to(paths.root))
+        record = build_record(
+            paths,
+            config,
+            metrics,
+            description=(
+                f"AE search top-{rank} reevaluation | family={params['ae_architecture']} | "
+                f"latent={params['latent_dim']} | width={params['ae_width_mult']:.3f} | "
+                f"coordconv={params['coordconv']} | refine_blocks={params.get('refine_blocks', 'n/a')}"
+            ),
+            status=status,
+            failure_reason=failure_reason,
+            next_hypothesis="Use the best reevaluated AE candidate as the new reference architecture.",
+            metrics_path=str((paths.nonlinear_dir / output_tag / "metrics.json").relative_to(paths.root)),
+            log_path=log_path,
+        )
+        record_experiment(paths, record)
+        reevaluated.append(
+            {
+                "rank": rank,
+                "output_tag": output_tag,
+                "status": record.status,
+                "primary_score": record.primary_score,
+                "params": params,
+            }
+        )
+    summary = {
+        "study_name": study_name,
+        "family": family,
+        "trials_requested": trials,
+        "completed_trials": len(trial_payloads),
+        "best_ae_score": min((float(item["ae_score"]) for item in trial_payloads if item["status"] == "ok"), default=None),
+        "trials": trial_payloads,
+        "reevaluated_top_candidates": reevaluated,
+        "best_reevaluated_score": min((float(item["primary_score"]) for item in reevaluated), default=None),
+    }
+    _write_study_summary(study_dir, summary)
+    return summary
+
+
+def _run_campaign(
+    paths: ProjectPaths,
+    config: AutoresearchConfig,
+    *,
+    campaign_name: str,
+    family_cycle: tuple[str, ...],
+    trials_per_round: int,
+    top_k: int,
+    device: str | None,
+    max_rounds: int,
+    max_hours: float,
+    stop_file: Path,
+    search_runner=_run_search_ae,
+    time_source=time.monotonic,
+) -> dict[str, object]:
+    campaign_dir = _campaign_dir(paths, campaign_name)
+    state_path = campaign_dir / "campaign_state.json"
+    started_at = utc_timestamp()
+    started_monotonic = time_source()
+    rounds: list[dict[str, object]] = []
+    status = "running"
+    stop_reason = "running"
+    round_number = 0
+
+    while True:
+        elapsed_seconds = max(0.0, time_source() - started_monotonic)
+        if stop_file.exists():
+            status = "stopped"
+            stop_reason = "stop_file"
+            break
+        if max_rounds > 0 and round_number >= max_rounds:
+            status = "completed"
+            stop_reason = "max_rounds"
+            break
+        if max_hours > 0 and elapsed_seconds >= max_hours * 3600.0:
+            status = "completed"
+            stop_reason = "max_hours"
+            break
+
+        family = family_cycle[round_number % len(family_cycle)]
+        study_name = f"{campaign_name}-round-{round_number + 1:03d}-{family}"
+        records_before = load_records(paths)
+        best_before = best_record(records_before)
+
+        try:
+            summary = search_runner(
+                paths,
+                config,
+                study_name=study_name,
+                family=family,
+                trials=trials_per_round,
+                top_k=top_k,
+                device=device,
+            )
+            round_status = "ok"
+            error = ""
+        except Exception as exc:  # noqa: BLE001
+            summary = {
+                "study_name": study_name,
+                "family": family,
+                "completed_trials": 0,
+                "reevaluated_top_candidates": [],
+                "best_reevaluated_score": None,
+            }
+            round_status = "crash"
+            error = str(exc)
+            status = "crash"
+            stop_reason = "crash"
+
+        records_after = load_records(paths)
+        best_after = best_record(records_after)
+        rounds.append(
+            {
+                "round_number": round_number + 1,
+                "family": family,
+                "study_name": study_name,
+                "status": round_status,
+                "error": error,
+                "experiments_before": len(records_before),
+                "experiments_after": len(records_after),
+                "best_score_before": None if best_before is None else best_before.primary_score,
+                "best_score_after": None if best_after is None else best_after.primary_score,
+                "best_reevaluated_score": summary.get("best_reevaluated_score"),
+                "recorded_experiments": max(0, len(records_after) - len(records_before)),
+            }
+        )
+        write_json(
+            state_path,
+            {
+                "campaign_name": campaign_name,
+                "run_tag": paths.run_tag,
+                "started_at": started_at,
+                "updated_at": utc_timestamp(),
+                "status": status if status != "running" else "running",
+                "family_cycle": list(family_cycle),
+                "trials_per_round": trials_per_round,
+                "top_k": top_k,
+                "max_rounds": max_rounds,
+                "max_hours": max_hours,
+                "stop_file": _display_path(stop_file, paths.root),
+                "stop_reason": stop_reason,
+                "elapsed_seconds": elapsed_seconds,
+                "rounds_completed": len(rounds),
+                "rounds": rounds,
+            },
+        )
+        round_number += 1
+        if round_status != "ok":
+            break
+
+    final_state = read_json(state_path) if state_path.exists() else {
+        "campaign_name": campaign_name,
+        "run_tag": paths.run_tag,
+        "started_at": started_at,
+        "updated_at": utc_timestamp(),
+        "status": status,
+        "family_cycle": list(family_cycle),
+        "trials_per_round": trials_per_round,
+        "top_k": top_k,
+        "max_rounds": max_rounds,
+        "max_hours": max_hours,
+        "stop_file": _display_path(stop_file, paths.root),
+        "stop_reason": stop_reason,
+        "elapsed_seconds": max(0.0, time_source() - started_monotonic),
+        "rounds_completed": len(rounds),
+        "rounds": rounds,
+    }
+    final_state["status"] = status
+    final_state["stop_reason"] = stop_reason
+    final_state["updated_at"] = utc_timestamp()
+    final_state["elapsed_seconds"] = max(0.0, time_source() - started_monotonic)
+    write_json(state_path, final_state)
+    return final_state
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Autoresearch helpers for experiment logging.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -265,12 +597,26 @@ def main() -> None:
     search_parser.add_argument("--study-name", default="residual-multiscale")
     search_parser.add_argument(
         "--family",
-        choices=["residual", "residual_refine", "residual_multiscale"],
+        choices=SEARCH_FAMILIES,
         default="residual_multiscale",
     )
     search_parser.add_argument("--trials", type=int, default=12)
     search_parser.add_argument("--top-k", type=int, default=3)
     search_parser.add_argument("--device", default=None)
+
+    campaign_parser = subparsers.add_parser(
+        "run-campaign",
+        help="Run unattended AE-search rounds until max rounds are reached or a stop file appears.",
+    )
+    campaign_parser.add_argument("--run-tag", default=ProjectPaths().run_tag)
+    campaign_parser.add_argument("--campaign-name", default="autonomous-ae")
+    campaign_parser.add_argument("--families", default="residual_refine")
+    campaign_parser.add_argument("--trials-per-round", type=int, default=8)
+    campaign_parser.add_argument("--top-k", type=int, default=2)
+    campaign_parser.add_argument("--max-rounds", type=int, default=0, help="0 means run until a stop file is created.")
+    campaign_parser.add_argument("--max-hours", type=float, default=0.0, help="0 disables the wall-clock campaign limit.")
+    campaign_parser.add_argument("--device", default=None)
+    campaign_parser.add_argument("--stop-file", default=None, help="Optional explicit path for a campaign stop file.")
 
     args = parser.parse_args()
     paths = ProjectPaths(run_tag=args.run_tag)
@@ -283,167 +629,43 @@ def main() -> None:
         return
 
     if args.command == "search-ae":
-        try:
-            import optuna
-        except ImportError as exc:  # pragma: no cover - exercised in runtime, not unit tests
-            raise RuntimeError("Optuna is required for search-ae. Install it in the project environment.") from exc
-
         config = AutoresearchConfig(run_tag=paths.run_tag)
-        study_dir = _search_dir(paths, args.study_name)
-        trial_payloads: list[dict[str, object]] = []
-        sampler = optuna.samplers.TPESampler(seed=42)
-        study = optuna.create_study(direction="minimize", sampler=sampler)
-        _enqueue_warm_start_trials(study, args.family)
-
-        def objective(trial: optuna.trial.Trial) -> float:
-            params = _sample_search_params(trial, args.family)
-            output_tag = _trial_output_tag(args.study_name, trial.number + 1)
-            command = _default_command(
-                output_tag,
-                False,
-                ae_only=True,
-                layout=str(params["layout"]),
-                ae_architecture=str(params["ae_architecture"]),
-                ae_width_mult=float(params["ae_width_mult"]),
-                coordconv=bool(params["coordconv"]),
-                coarse_loss_weight=float(params.get("coarse_loss_weight", 0.25)),
-                coarse_blur_kernel=int(params.get("coarse_blur_kernel", 9)),
-                coarse_blur_sigma=float(params.get("coarse_blur_sigma", 2.0)),
-                refine_blocks=int(params.get("refine_blocks", 1)),
-                refine_channels_mult=float(params.get("refine_channels_mult", 1.0)),
-                latent_dim=int(params["latent_dim"]),
-                ae_learning_rate=float(params["ae_learning_rate"]),
-                gradient_loss_weight=float(params["gradient_loss_weight"]),
-                fft_loss_weight=float(params["fft_loss_weight"]),
-                latent_l1_weight=float(params["latent_l1_weight"]),
-                device=args.device,
-            )
-            try:
-                metrics, log_path = _run_and_collect(paths, command, output_tag, config.timeout_seconds)
-                ae_score = float(metrics["ae_score"])
-                payload = {
-                    "trial_number": trial.number + 1,
-                    "status": "ok",
-                    "ae_score": ae_score,
-                    "recon_rmse": float(metrics["recon_rmse"]),
-                    "ae_floor_rmse_t100": float(metrics["ae_floor_rmse_t100"]),
-                    "ae_floor_rmse_t150": float(metrics["ae_floor_rmse_t150"]),
-                    "metrics_path": str((paths.nonlinear_dir / output_tag / "metrics.json").relative_to(paths.root)),
-                    "log_path": log_path,
-                    "params": params,
-                }
-            except Exception as exc:  # noqa: BLE001
-                ae_score = float("inf")
-                payload = {
-                    "trial_number": trial.number + 1,
-                    "status": "crash",
-                    "ae_score": ae_score,
-                    "recon_rmse": 0.0,
-                    "ae_floor_rmse_t100": 0.0,
-                    "ae_floor_rmse_t150": 0.0,
-                    "metrics_path": str((paths.nonlinear_dir / output_tag / "metrics.json").relative_to(paths.root)),
-                    "log_path": str((paths.run_log_dir / f"{output_tag}.log").relative_to(paths.root)),
-                    "error": str(exc),
-                    "params": params,
-                }
-            trial_payloads.append(payload)
-            _write_study_summary(
-                study_dir,
-                {
-                    "study_name": args.study_name,
-                    "family": args.family,
-                    "trials_requested": args.trials,
-                    "completed_trials": len(trial_payloads),
-                    "best_ae_score": min((float(item["ae_score"]) for item in trial_payloads if item["status"] == "ok"), default=None),
-                    "trials": trial_payloads,
-                },
-            )
-            return ae_score
-
-        study.optimize(objective, n_trials=args.trials)
-        top_trials = _collect_top_trials(trial_payloads, args.top_k)
-        reevaluated: list[dict[str, object]] = []
-        for rank, trial_payload in enumerate(top_trials, start=1):
-            params = dict(trial_payload["params"])
-            experiment_id = len(load_records(paths)) + 1
-            output_tag = f"exp-{experiment_id:04d}"
-            command = _default_command(
-                output_tag,
-                False,
-                layout=str(params["layout"]),
-                ae_architecture=str(params["ae_architecture"]),
-                ae_width_mult=float(params["ae_width_mult"]),
-                coordconv=bool(params["coordconv"]),
-                coarse_loss_weight=float(params.get("coarse_loss_weight", 0.25)),
-                coarse_blur_kernel=int(params.get("coarse_blur_kernel", 9)),
-                coarse_blur_sigma=float(params.get("coarse_blur_sigma", 2.0)),
-                refine_blocks=int(params.get("refine_blocks", 1)),
-                refine_channels_mult=float(params.get("refine_channels_mult", 1.0)),
-                dynamics_model="residual_linear",
-                latent_dim=int(params["latent_dim"]),
-                ae_learning_rate=float(params["ae_learning_rate"]),
-                gradient_loss_weight=float(params["gradient_loss_weight"]),
-                fft_loss_weight=float(params["fft_loss_weight"]),
-                latent_l1_weight=float(params["latent_l1_weight"]),
-                device=args.device,
-            )
-            try:
-                metrics, log_path = _run_and_collect(paths, command, output_tag, config.timeout_seconds)
-                failure_reason = ""
-                status = None
-            except Exception as exc:  # noqa: BLE001
-                metrics = {
-                    "primary_score": 0.0,
-                    "recon_rmse": 0.0,
-                    "rmse_t100": 0.0,
-                    "rmse_t150": 0.0,
-                    "peak_memory_gb": 0.0,
-                    "wall_seconds": float(config.timeout_seconds),
-                }
-                failure_reason = str(exc)
-                status = "crash"
-                log_path = str((paths.run_log_dir / f"{output_tag}.log").relative_to(paths.root))
-            record = build_record(
-                paths,
-                config,
-                metrics,
-                description=(
-                    f"AE search top-{rank} reevaluation | family={params['ae_architecture']} | "
-                    f"latent={params['latent_dim']} | width={params['ae_width_mult']:.3f} | "
-                    f"coordconv={params['coordconv']} | refine_blocks={params.get('refine_blocks', 'n/a')}"
-                ),
-                status=status,
-                failure_reason=failure_reason,
-                next_hypothesis="Use the best reevaluated AE candidate as the new reference architecture.",
-                metrics_path=str((paths.nonlinear_dir / output_tag / "metrics.json").relative_to(paths.root)),
-                log_path=log_path,
-            )
-            record_experiment(paths, record)
-            reevaluated.append(
-                {
-                    "rank": rank,
-                    "output_tag": output_tag,
-                    "status": record.status,
-                    "primary_score": record.primary_score,
-                    "params": params,
-                }
-            )
-        _write_study_summary(
-            study_dir,
-            {
-                "study_name": args.study_name,
-                "family": args.family,
-                "trials_requested": args.trials,
-                "completed_trials": len(trial_payloads),
-                "best_ae_score": min((float(item["ae_score"]) for item in trial_payloads if item["status"] == "ok"), default=None),
-                "trials": trial_payloads,
-                "reevaluated_top_candidates": reevaluated,
-            },
+        summary = _run_search_ae(
+            paths,
+            config,
+            study_name=args.study_name,
+            family=args.family,
+            trials=args.trials,
+            top_k=args.top_k,
+            device=args.device,
         )
         print(f"Completed AE search: {args.study_name}")
-        print(f"Completed trials: {len(trial_payloads)}")
-        if reevaluated:
-            print(f"Best reevaluated score: {min(item['primary_score'] for item in reevaluated):.6f}")
+        print(f"Completed trials: {summary['completed_trials']}")
+        if summary["best_reevaluated_score"] is not None:
+            print(f"Best reevaluated score: {summary['best_reevaluated_score']:.6f}")
+        return
+
+    if args.command == "run-campaign":
+        config = AutoresearchConfig(run_tag=paths.run_tag)
+        family_cycle = _parse_family_cycle(args.families)
+        stop_file = Path(args.stop_file).resolve() if args.stop_file else (_campaign_dir(paths, args.campaign_name) / "STOP")
+        state = _run_campaign(
+            paths,
+            config,
+            campaign_name=args.campaign_name,
+            family_cycle=family_cycle,
+            trials_per_round=args.trials_per_round,
+            top_k=args.top_k,
+            device=args.device,
+            max_rounds=args.max_rounds,
+            max_hours=args.max_hours,
+            stop_file=stop_file,
+        )
+        print(f"Campaign: {args.campaign_name}")
+        print(f"Status: {state['status']}")
+        print(f"Stop reason: {state['stop_reason']}")
+        print(f"Rounds completed: {state['rounds_completed']}")
+        print(f"Stop file: {state['stop_file']}")
         return
 
     config = AutoresearchConfig(run_tag=paths.run_tag)
