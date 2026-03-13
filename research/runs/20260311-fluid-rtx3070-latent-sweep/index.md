@@ -6,7 +6,7 @@ Validate whether the `exp-0046` bottleneck is still limited by `latent_dim=24`
 and whether a larger latent can beat the mainline nonlinear baseline without
 changing the architecture family.
 
-Reference mainline baseline from `D:\Projects\ML_FluidDynamics`:
+Reference mainline baseline from `D:\Projects\ML_FluidDynamics_Project\ML_FluidDynamics`:
 
 - `exp-0046`
 - `primary_score=0.000613`
@@ -59,3 +59,4 @@ Reference mainline baseline from `D:\Projects\ML_FluidDynamics`:
   - DMD `rmse_t150=0.018166`
   - branch best `rmse_t150=0.018893`
 - The remaining gap is much smaller now, but the AE floor still sits above DMD.
+

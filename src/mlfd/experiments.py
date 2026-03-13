@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .config import AutoresearchConfig, ProjectPaths
 from .utils import short_git_commit, utc_timestamp
@@ -49,16 +50,52 @@ def init_results_file(paths: ProjectPaths) -> None:
         writer.writeheader()
 
 
+def _parse_experiment_id(path: Path) -> int | None:
+    if path.stem.startswith("exp-"):
+        suffix = path.stem.split("-", maxsplit=1)[1]
+        if suffix.isdigit():
+            return int(suffix)
+    return None
+
+
+def _local_experiment_ids(paths: ProjectPaths) -> list[int]:
+    ids = []
+    for path in sorted(paths.experiment_dir.glob("exp-*.md")):
+        experiment_id = _parse_experiment_id(path)
+        if experiment_id is not None:
+            ids.append(experiment_id)
+    return ids
+
+
+def _next_global_experiment_id(paths: ProjectPaths) -> int:
+    root_parent = paths.root.parent
+    max_id = 0
+    for sibling in root_parent.iterdir():
+        if not sibling.is_dir() or not sibling.name.startswith("ML_FluidDynamics"):
+            continue
+        experiment_dir = sibling / "research" / "experiments"
+        if not experiment_dir.exists():
+            continue
+        for path in experiment_dir.glob("exp-*.md"):
+            experiment_id = _parse_experiment_id(path)
+            if experiment_id is not None:
+                max_id = max(max_id, experiment_id)
+    return max_id + 1
+
+
 def load_records(paths: ProjectPaths) -> list[ExperimentRecord]:
     if not paths.results_tsv.exists():
         return []
     records: list[ExperimentRecord] = []
+    local_ids = _local_experiment_ids(paths)
     with paths.results_tsv.open("r", newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle, delimiter="\t")
-        for idx, row in enumerate(reader, start=1):
+        rows = list(csv.DictReader(handle, delimiter="\t"))
+        use_local_ids = len(local_ids) == len(rows)
+        for idx, row in enumerate(rows, start=1):
+            experiment_id = local_ids[idx - 1] if use_local_ids else idx
             records.append(
                 ExperimentRecord(
-                    experiment_id=idx,
+                    experiment_id=experiment_id,
                     commit=row["commit"],
                     primary_score=float(row["primary_score"]),
                     recon_rmse=float(row["recon_rmse"]),
@@ -271,7 +308,7 @@ def build_record(
     records = load_records(paths)
     decided_status = status or decide_status(metrics["primary_score"], metrics["peak_memory_gb"], records, config)
     return ExperimentRecord(
-        experiment_id=len(records) + 1,
+        experiment_id=_next_global_experiment_id(paths),
         commit=short_git_commit(paths.root),
         primary_score=float(metrics["primary_score"]),
         recon_rmse=float(metrics["recon_rmse"]),

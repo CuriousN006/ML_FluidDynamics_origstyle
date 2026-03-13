@@ -51,10 +51,19 @@
 - exp-0047 | discard | score=0.000720 | Reg-2 | residual_refine regularizer ablation
 - exp-0048 | discard | score=0.000670 | Reg-3 | residual_refine regularizer ablation
 - exp-0049 | discard | score=0.092935 | Reg-4 | residual_refine regularizer ablation
+- exp-0050 | discard | score=0.000613 | Latent sweep Stage 0 parity | residual_refine latent=24 baseline replay
+- exp-0051 | keep | score=0.000565 | Latent sweep Stage 2 | residual_refine latent=32 full rollout
+- exp-0052 | discard | score=0.000567 | Latent sweep Stage 3 R1 | residual_refine latent=32 rollout_loss_weight=0.10
+- exp-0053 | discard | score=0.000566 | Latent sweep Stage 3 R2 | residual_refine latent=32 rollout_loss_weight=0.20
+- exp-0054 | discard | score=0.000569 | Latent sweep Stage 3 R3 | residual_refine latent=32 rollout_loss_weight=0.30
+- exp-0055 | discard | score=0.001127 | Reg-0 | latent32 residual_refine regularizer ablation
+- exp-0056 | discard | score=0.000979 | Reg-2 | latent32 residual_refine regularizer ablation
+- exp-0057 | discard | score=0.000566 | Reg-3 | latent32 residual_refine regularizer ablation
+- exp-0058 | discard | score=0.242610 | Reg-4 | latent32 residual_refine regularizer ablation
 
 ## Best Model Changes
 
-- Current best: exp-0046 (0.000613)
+- Current best: exp-0051 (0.000565)
 
 ## Open Risks
 

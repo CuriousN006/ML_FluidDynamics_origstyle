@@ -1,11 +1,5 @@
 # Research State
 
-## Scope Note
-
-- This is the active global-reference state file as of 2026-03-11.
-- Branch-local and overall best is `exp-0051` (`primary_score=0.000565`).
-- Sibling worktrees should treat this file as the current reference until they produce a confirmed win.
-
 ## Current Best
 
 - Experiment: exp-0051
@@ -23,12 +17,10 @@
 
 ## Avoid Repeating
 
-- Do not retry `latent_dim=48` on the current `residual_refine` branch.
-- Do not reopen `rollout_loss_weight` around `0.15` unless another architectural change shifts the optimum.
-- Strong regularization (`Reg-4`) is clearly off the table.
+- Review discarded runs before retrying the same idea.
 
 ## Next Priorities
 
-1. Preserve `exp-0051` as the new nonlinear reference for future branches.
-2. Target the remaining DMD gap with a decoder-side AE-floor improvement, not another dynamics-only tweak.
-3. Keep future screening cheap: AE-only first, then full rollout only for candidates that improve the floor.
+1. Inspect the latest discarded run and extract the lesson.
+2. Try the next highest-value architecture or regularization change.
+3. Update the long-form report after a meaningful improvement.

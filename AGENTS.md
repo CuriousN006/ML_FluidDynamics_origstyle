@@ -61,4 +61,5 @@ Always trust the scope/status notes at the top of those files before reading the
 ## Environment Notes
 
 - `CYLINDER_ALL.mat` must remain in the repo root.
-- This worktree may reuse `D:\Projects\ML_FluidDynamics\.venv` if no local `.venv` is present; use `PYTHONPATH=<worktree>\src` in that case.
+- This worktree may reuse `D:\Projects\ML_FluidDynamics_Project\ML_FluidDynamics\.venv` if no local `.venv` is present; use `PYTHONPATH=<worktree>\src` in that case.
+

@@ -48,7 +48,7 @@ py -3.12 -m venv .venv
 ## Notes
 
 - The runtime assumes `CYLINDER_ALL.mat` is present in the repo root.
-- Some sibling worktrees currently reuse `D:\Projects\ML_FluidDynamics\.venv`; if a side worktree has no local `.venv`, run that interpreter with `PYTHONPATH=<worktree>\src`.
+- Some sibling worktrees currently reuse `D:\Projects\ML_FluidDynamics_Project\ML_FluidDynamics\.venv`; if a side worktree has no local `.venv`, run that interpreter with `PYTHONPATH=<worktree>\src`.
 - Existing PNG dumps are treated as derived visualizations, not primary training data.
 - Current winning configuration: `residual_refine`, `latent_dim=32`, `latent_l1_weight=1e-4`, `rollout_loss_weight=0.15`.
 
