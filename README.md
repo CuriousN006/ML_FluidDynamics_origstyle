@@ -30,6 +30,7 @@ py -3.12 -m venv .venv
 - `python -m mlfd.autoresearch init-run`: initialize a new research campaign.
 - `python -m mlfd.autoresearch baseline-check`: run one clean baseline/debug check without candidate keep/discard automation.
 - `python -m mlfd.autoresearch apply-candidate`: commit the current code change, run it once, and automatically keep or discard it.
+- `python -m mlfd.autoresearch recover-candidate`: restore an interrupted candidate commit after a crash, forced stop, or power loss.
 - `python -m mlfd.autoresearch run-current`: execute and log the current code once without candidate keep/discard automation.
 - `python -m mlfd.autoresearch run-campaign`: keep running unattended AE-search rounds until `--max-rounds`, `--max-hours`, or a stop file ends the campaign.
 - `python -m mlfd.autoresearch snapshot-logs`: checkpoint `results.tsv` and `research/` into the dedicated log worktree branch.
@@ -48,7 +49,7 @@ py -3.12 -m venv .venv
 
 - Branch: `campaign/20260313-local-rtx3070`
 - Role: isolated autonomous sandbox cloned from the nonlinear reference branch.
-- Imported reference: `exp-0051` with `primary_score=0.000565`.
+- The authoritative branch status, imported baseline, and exact winning metrics live in `program.md`.
 - Preferred local workspace for original-style agentic autoresearch before promoting anything back to sibling worktrees.
 
 ## Git Workflow
@@ -56,19 +57,20 @@ py -3.12 -m venv .venv
 - `main`: stable scaffold and tooling branch.
 - Current checked-out branch: active campaign branch where winner code commits advance.
 - Separate `log/...` worktree: append-only experiment memory branch for `results.tsv` and `research/` checkpoints.
-- Use `snapshot-logs` periodically so code history stays clean while experiment memory remains preserved.
+- Use `snapshot-logs` after every kept result, after about five experiments, and before ending a session so code history stays clean while experiment memory remains preserved.
 
 ## Notes
 
 - The runtime assumes `CYLINDER_ALL.mat` is present in the repo root.
 - This clone is intended as an isolated autonomous sandbox. Review local results here before importing anything back into the sibling worktrees.
 - The primary workflow in this clone is original-style agentic autoresearch: the coding agent edits the nonlinear code, uses `apply-candidate --idea-key ...`, and repeats.
+- `program.md` is the authoritative source for the active branch role, imported baseline, and current winning configuration. Keep README and AGENTS as shorter onboarding summaries.
 - `run-current` and `baseline-check` are for baseline validation or debugging, not for the main research loop.
 - `apply-candidate` commits only `src/` and `tests/` changes, records the run, and restores the previous code automatically when the result is discarded or crashes.
+- If an `apply-candidate` run is interrupted before cleanup, run `python -m mlfd.autoresearch recover-candidate` before starting another candidate.
 - Idea keys should use `lower_snake_case`. Use a material version suffix such as `_v1`, `_v2` when the formulation itself changes.
 - Nonlinear runs do not save `autoencoder.pt` by default. Use `python -m mlfd.run_nonlinear --save-checkpoint true` only when you explicitly need a checkpoint artifact.
 - `run-campaign` is a bounded helper for unattended AE-screening, not the main research workflow.
 - Some sibling worktrees currently reuse `D:\Projects\ML_FluidDynamics_Project\ML_FluidDynamics\.venv`; if a side worktree has no local `.venv`, run that interpreter with `PYTHONPATH=<worktree>\src`.
 - Existing PNG dumps are treated as derived visualizations, not primary training data.
-- Current winning configuration: `residual_refine`, `latent_dim=32`, `latent_l1_weight=1e-4`, `rollout_loss_weight=0.15`.
 - This sandbox assumes local execution. Remote Azure GPU workflow is out of scope for this workspace.

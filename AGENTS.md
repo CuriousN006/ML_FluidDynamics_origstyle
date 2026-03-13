@@ -5,10 +5,10 @@ This file is the onboarding note for first-time agents in this worktree.
 ## Read Order
 
 1. `README.md` for the quick summary of this worktree's role.
-2. `program.md` for the branch charter, reference baseline, and runtime budget.
+2. `program.md` for the authoritative branch charter, exact imported baseline, and runtime budget.
 3. `research/idea_registry.md` for cross-worktree blocked and paused idea families.
 4. `research/state.md` for the short external memory.
-5. `research/final_report.md` for the long-form narrative.
+5. Open `research/final_report.md` only after you have a candidate direction or if the short memory is not enough.
 
 Always trust the scope/status notes at the top of those files before reading the rest.
 
@@ -37,9 +37,8 @@ Always trust the scope/status notes at the top of those files before reading the
 ## Current Progress
 
 - The data contract, portrait layout, linear pipeline, nonlinear pipeline, experiment ledger, and reporting flow are all implemented.
-- Best linear comparison target: `DMD` rank `15` with `rmse_t100=0.017423` and `rmse_t150=0.018166`.
-- Best nonlinear result as of 2026-03-11: `exp-0051` in this worktree with `primary_score=0.000565`, `rmse_t100=0.020372`, and `rmse_t150=0.018893`.
-- The nonlinear line already beats the rank-10 linear rollout and truncated reconstruction, but it does not yet beat the best `DMD` baseline.
+- The authoritative branch role, imported baseline, and exact metrics live in `program.md`.
+- The nonlinear line already beats the weaker linear references, but it does not yet beat the best `DMD` baseline.
 
 ## Current Objective
 
@@ -54,14 +53,16 @@ Always trust the scope/status notes at the top of those files before reading the
 - Do not spend another campaign on pure dynamics complexity unless a branch has evidence that the representation bottleneck is no longer the limiter.
 - Run this clone in original-style agentic loops: edit code under `src/` or `tests/`, execute `python -m mlfd.autoresearch apply-candidate --idea-key ...`, judge the result, and continue.
 - Use `python -m mlfd.autoresearch baseline-check` or `run-current` only for baseline/debug checks, not for normal candidate iteration.
+- If `apply-candidate` was interrupted by a crash, forced stop, or power loss, run `python -m mlfd.autoresearch recover-candidate` before starting a new candidate.
 - Idea keys should use `lower_snake_case`; use `_vN` when the formulation changes materially.
 - Keep winner code history on the active campaign branch; checkpoint `results.tsv` and `research/` into the separate log worktree with `snapshot-logs`.
+- Snapshot logs after every kept result, after about five experiments, and before shutting down a session.
 - Treat `run-campaign` only as a bounded helper for unattended AE screening.
 
 ## Current Worktree
 
 - Role: isolated autonomous sandbox cloned from the active global-reference worktree.
-- Imported reference as of 2026-03-11: `exp-0051` with `primary_score=0.000565`.
+- Exact imported-reference details are authoritative in `program.md`.
 - Keep local experiments here until they are reviewed and explicitly promoted back into the sibling worktrees.
 
 ## Environment Notes

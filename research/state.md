@@ -1,5 +1,7 @@
 # Research State
 
+> Generated short-term memory. Do not hand-edit except to repair factual mistakes; the next recorded experiment will regenerate this file.
+
 ## Current Best
 
 - Experiment: exp-0051

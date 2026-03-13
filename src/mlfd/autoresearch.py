@@ -272,6 +272,83 @@ def _restore_discarded_candidate(root: Path, base_commit: str, candidate_entries
         run_git(root, ["clean", "-fd", "--", *added_paths], capture_output=True)
 
 
+def _load_candidate_recovery_state(paths: ProjectPaths) -> dict[str, object] | None:
+    if not paths.candidate_recovery_json.exists():
+        return None
+    return read_json(paths.candidate_recovery_json)
+
+
+def _write_candidate_recovery_state(
+    paths: ProjectPaths,
+    *,
+    base_commit: str,
+    candidate_commit: str,
+    candidate_entries: list[dict[str, str]],
+    idea_key: str,
+    description: str,
+    output_tag: str,
+) -> None:
+    write_json(
+        paths.candidate_recovery_json,
+        {
+            "created_at": utc_timestamp(),
+            "run_tag": paths.run_tag,
+            "base_commit": base_commit,
+            "candidate_commit": candidate_commit,
+            "candidate_entries": candidate_entries,
+            "idea_key": idea_key,
+            "description": description,
+            "output_tag": output_tag,
+        },
+    )
+
+
+def _clear_candidate_recovery_state(paths: ProjectPaths) -> None:
+    if paths.candidate_recovery_json.exists():
+        paths.candidate_recovery_json.unlink()
+
+
+def _ensure_no_pending_candidate_recovery(paths: ProjectPaths) -> None:
+    payload = _load_candidate_recovery_state(paths)
+    if payload is None:
+        return
+    candidate_commit = str(payload.get("candidate_commit", "unknown"))
+    output_tag = str(payload.get("output_tag", "unknown"))
+    raise RuntimeError(
+        "An interrupted candidate recovery marker is still present for "
+        f"{output_tag} at {paths.candidate_recovery_json}. "
+        f"Run `python -m mlfd.autoresearch recover-candidate --run-tag {paths.run_tag}` "
+        f"before starting another candidate. Recorded candidate commit: {candidate_commit}."
+    )
+
+
+def _recover_interrupted_candidate(paths: ProjectPaths, *, clear_only: bool = False) -> str:
+    payload = _load_candidate_recovery_state(paths)
+    if payload is None:
+        return "No interrupted candidate recovery state found."
+    if clear_only:
+        _clear_candidate_recovery_state(paths)
+        return f"Cleared recovery marker at {paths.candidate_recovery_json}"
+
+    candidate_commit = str(payload["candidate_commit"])
+    base_commit = str(payload["base_commit"])
+    current_head = _git_head_commit(paths.root)
+    if current_head != candidate_commit:
+        raise RuntimeError(
+            "Recovery marker does not match the current HEAD. "
+            f"Expected {candidate_commit[:7]}, found {current_head[:7]}. "
+            "Inspect the branch manually, then rerun recover-candidate --clear-only if you resolved it."
+        )
+    candidate_entries = list(payload["candidate_entries"])
+    _restore_discarded_candidate(paths.root, base_commit, candidate_entries)
+    _clear_candidate_recovery_state(paths)
+    output_tag = str(payload.get("output_tag", "unknown"))
+    return (
+        f"Restored interrupted candidate {candidate_commit[:7]} for {output_tag} "
+        f"back to {base_commit[:7]}"
+    )
+
+
 def _copy_log_paths(paths: ProjectPaths, log_root: Path) -> None:
     for relative in paths.log_sync_paths:
         source = paths.root / relative
@@ -798,6 +875,17 @@ def main() -> None:
         help="Allow a clean-tree baseline run without creating a candidate commit.",
     )
 
+    recover_parser = subparsers.add_parser(
+        "recover-candidate",
+        help="Restore the last interrupted candidate commit if apply-candidate was cut off before keep/discard cleanup.",
+    )
+    recover_parser.add_argument("--run-tag", default=ProjectPaths().run_tag)
+    recover_parser.add_argument(
+        "--clear-only",
+        action="store_true",
+        help="Only clear a stale recovery marker after you resolved the branch state manually.",
+    )
+
     search_parser = subparsers.add_parser("search-ae", help="Run an Optuna/TPE AE-only search and full-evaluate the top candidates.")
     search_parser.add_argument("--run-tag", default=ProjectPaths().run_tag)
     search_parser.add_argument("--study-name", default="residual-multiscale")
@@ -844,10 +932,15 @@ def main() -> None:
         print(f"Expected branch: {paths.branch_name}")
         return
 
+    if args.command == "recover-candidate":
+        print(_recover_interrupted_candidate(paths, clear_only=args.clear_only))
+        return
+
     if args.command == "apply-candidate":
         config = AutoresearchConfig(run_tag=paths.run_tag)
         registry = load_registry(paths)
         idea_key = _validate_idea_key(args.idea_key)
+        _ensure_no_pending_candidate_recovery(paths)
         check_idea_allowed(registry, idea_key, force_revisit_reason=args.force_revisit_reason)
         candidate_entries, out_of_scope = _collect_candidate_changes(paths)
         if out_of_scope:
@@ -877,6 +970,15 @@ def main() -> None:
         commit_message = args.commit_message or args.description
         candidate_commit = _git_commit_candidate(paths.root, candidate_paths, commit_message)
         output_tag = f"exp-{len(load_records(paths)) + 1:04d}"
+        _write_candidate_recovery_state(
+            paths,
+            base_commit=base_commit,
+            candidate_commit=candidate_commit,
+            candidate_entries=candidate_entries,
+            idea_key=idea_key,
+            description=args.description,
+            output_tag=output_tag,
+        )
         command = _default_command(output_tag, args.smoke, device=args.device)
         record = _execute_logged_run(
             paths,
@@ -895,6 +997,7 @@ def main() -> None:
             print(f"Discarded candidate {candidate_commit[:7]} and restored code to {base_commit[:7]}")
         else:
             print(f"Kept candidate commit {candidate_commit[:7]}")
+        _clear_candidate_recovery_state(paths)
         print(f"Recorded exp-{record.experiment_id:04d}")
         print(f"Status: {record.status}")
         print(f"Primary score: {record.primary_score:.6f}")

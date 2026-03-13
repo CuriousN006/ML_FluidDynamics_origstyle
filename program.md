@@ -15,11 +15,12 @@ human interrupts it.
 
 Before starting a new loop:
 
-1. Read `README.md`, `AGENTS.md`, `program.md`, `research/idea_registry.md`, `research/state.md`, and `research/final_report.md`.
-2. Verify the environment with `python -m mlfd.setup`.
-3. Confirm `CYLINDER_ALL.mat` exists in the repo root.
-4. Confirm the current best imported reference is still `exp-0051`.
-5. If this sandbox has no local experiment history yet, run one clean baseline with:
+1. Read `README.md`, `AGENTS.md`, `program.md`, `research/idea_registry.md`, and `research/state.md`.
+2. Open `research/final_report.md` only after you have a candidate direction or if the short memory is not enough.
+3. Verify the environment with `python -m mlfd.setup`.
+4. Confirm `CYLINDER_ALL.mat` exists in the repo root.
+5. Confirm the current best imported reference is still `exp-0051`.
+6. If this sandbox has no local experiment history yet, run one clean baseline with:
 
 ```powershell
 python -m mlfd.autoresearch baseline-check --description "baseline import check" --next-hypothesis "Start the first real candidate change."
@@ -144,6 +145,20 @@ Use `python -m mlfd.autoresearch search-ae ...` or `run-campaign ...` only as he
 Use `baseline-check` or `run-current` only for clean baseline validation or debugging.
 Use `snapshot-logs` periodically to checkpoint append-only experiment memory into the dedicated log branch/worktree without polluting the campaign code history.
 
+## Interruption Recovery
+
+If `apply-candidate` is interrupted by a power loss, forced stop, terminal kill, or machine crash, recover before starting another candidate:
+
+```powershell
+python -m mlfd.autoresearch recover-candidate
+```
+
+This restores the last pending candidate commit back to its base commit when the interrupted candidate is still checked out. If you already resolved the branch state manually, clear the stale recovery marker with:
+
+```powershell
+python -m mlfd.autoresearch recover-candidate --clear-only
+```
+
 ## Keep/Discard Policy
 
 - Better `primary_score`: keep.
@@ -177,3 +192,11 @@ Every experiment must update:
 4. `research/runs/20260313-local-rtx3070/index.md`
 
 Failures are first-class results and must stay recorded.
+
+Use `snapshot-logs` on this cadence unless there is a reason not to:
+
+1. immediately after every kept result
+2. after about five experiments even if none were winners
+3. before shutting down the machine or ending a session
+
+`research/state.md` and `research/runs/.../index.md` are generated runtime memory, not hand-maintained narrative documents.

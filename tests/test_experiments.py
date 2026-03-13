@@ -156,12 +156,14 @@ def test_state_and_run_index_use_readable_experiment_labels(tmp_path: Path) -> N
     state_content = paths.state_md.read_text(encoding="utf-8")
     index_content = (paths.run_dir / "index.md").read_text(encoding="utf-8")
 
+    assert "Generated short-term memory." in state_content
     assert "- Idea key: residual_refine_decoder_conditioning_v1" in state_content
     assert (
         "- exp-0001 | residual_refine_decoder_conditioning_v1 | add refine-path conditioning | keep | score=0.123000"
         in state_content
     )
     assert "- exp-0002 | baseline import check | discard | score=0.124000" in state_content
+    assert "Generated campaign timeline." in index_content
     assert (
         "- exp-0001 | residual_refine_decoder_conditioning_v1 | add refine-path conditioning | keep | score=0.123000"
         in index_content

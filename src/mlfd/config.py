@@ -63,6 +63,10 @@ class ProjectPaths:
         return self.output_dir / "autoresearch" / self.run_tag
 
     @property
+    def candidate_recovery_json(self) -> Path:
+        return self.run_log_dir / "candidate_recovery.json"
+
+    @property
     def results_tsv(self) -> Path:
         return self.root / "results.tsv"
 

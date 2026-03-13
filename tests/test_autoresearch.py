@@ -7,12 +7,16 @@ import pytest
 
 from mlfd.autoresearch import (
     _collect_candidate_changes,
+    _clear_candidate_recovery_state,
+    _ensure_no_pending_candidate_recovery,
     _git_commit_candidate,
     _git_head_commit,
     _parse_family_cycle,
+    _recover_interrupted_candidate,
     _restore_discarded_candidate,
     _snapshot_logs,
     _validate_idea_key,
+    _write_candidate_recovery_state,
     _run_campaign,
 )
 from mlfd.config import AutoresearchConfig, ProjectPaths
@@ -94,6 +98,64 @@ def test_restore_discarded_candidate_keeps_runtime_logs(tmp_path: Path) -> None:
     assert (tmp_path / "src" / "mlfd" / "models.py").read_text(encoding="utf-8") == "x = 1\n"
     assert (tmp_path / "results.tsv").read_text(encoding="utf-8") == "new result\n"
     assert _git_head_commit(tmp_path) == base_commit
+
+
+def test_recover_interrupted_candidate_restores_candidate_commit(tmp_path: Path) -> None:
+    (tmp_path / "CYLINDER_ALL.mat").write_text("stub", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='tmp'\nversion='0.0.0'\n", encoding="utf-8")
+    (tmp_path / "src" / "mlfd").mkdir(parents=True)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src" / "mlfd" / "models.py").write_text("x = 1\n", encoding="utf-8")
+    _init_git_repo(tmp_path)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+
+    paths = ProjectPaths(root=tmp_path, run_tag="unit-test")
+    paths.ensure_directories()
+    base_commit = _git_head_commit(tmp_path)
+    (tmp_path / "src" / "mlfd" / "models.py").write_text("x = 2\n", encoding="utf-8")
+    candidate_entries = [{"status": "M", "path": "src/mlfd/models.py"}]
+    candidate_commit = _git_commit_candidate(tmp_path, ["src/mlfd/models.py"], "candidate")
+    _write_candidate_recovery_state(
+        paths,
+        base_commit=base_commit,
+        candidate_commit=candidate_commit,
+        candidate_entries=candidate_entries,
+        idea_key="decoder_adapter_v1",
+        description="candidate",
+        output_tag="exp-0001",
+    )
+
+    with pytest.raises(RuntimeError):
+        _ensure_no_pending_candidate_recovery(paths)
+
+    message = _recover_interrupted_candidate(paths)
+
+    assert "Restored interrupted candidate" in message
+    assert _git_head_commit(tmp_path) == base_commit
+    assert (tmp_path / "src" / "mlfd" / "models.py").read_text(encoding="utf-8") == "x = 1\n"
+    assert not paths.candidate_recovery_json.exists()
+    _ensure_no_pending_candidate_recovery(paths)
+
+
+def test_recover_interrupted_candidate_can_clear_stale_marker(tmp_path: Path) -> None:
+    paths = ProjectPaths(root=tmp_path, run_tag="unit-test")
+    paths.ensure_directories()
+    _write_candidate_recovery_state(
+        paths,
+        base_commit="abc1234",
+        candidate_commit="def5678",
+        candidate_entries=[],
+        idea_key="decoder_adapter_v1",
+        description="candidate",
+        output_tag="exp-0001",
+    )
+
+    message = _recover_interrupted_candidate(paths, clear_only=True)
+
+    assert "Cleared recovery marker" in message
+    assert not paths.candidate_recovery_json.exists()
+    _clear_candidate_recovery_state(paths)
 
 
 def test_short_git_commit_ignores_runtime_paths(tmp_path: Path) -> None:

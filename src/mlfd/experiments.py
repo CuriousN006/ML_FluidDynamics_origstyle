@@ -249,7 +249,14 @@ def refresh_state(paths: ProjectPaths) -> None:
     recent = records[-5:]
     registry = load_registry(paths)
     blocked = blocked_lines(registry)
-    lines = ["# Research State", "", "## Current Best", ""]
+    lines = [
+        "# Research State",
+        "",
+        "> Generated short-term memory. Do not hand-edit except to repair factual mistakes; the next recorded experiment will regenerate this file.",
+        "",
+        "## Current Best",
+        "",
+    ]
     if best is None:
         lines.extend(
             [
@@ -306,7 +313,14 @@ def refresh_state(paths: ProjectPaths) -> None:
 def refresh_run_index(paths: ProjectPaths) -> None:
     records = load_records(paths)
     best = best_record(records)
-    lines = [f"# Run {paths.run_tag}", "", "## Timeline", ""]
+    lines = [
+        f"# Run {paths.run_tag}",
+        "",
+        "> Generated campaign timeline. Treat this as append-only runtime memory derived from the experiment ledger.",
+        "",
+        "## Timeline",
+        "",
+    ]
     if records:
         for record in records:
             lines.append(
