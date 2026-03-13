@@ -37,6 +37,7 @@ The provisioning script checks:
 - `Total Regional vCPUs`
 - NC/T4 family quota
 - requested SKU availability in each priority region
+- subscription policy assignments for `Allowed resource deployment regions`
 
 Then it creates the resource group, provisions the VM, and configures
 auto-shutdown.
@@ -47,6 +48,10 @@ powershell -ExecutionPolicy Bypass -File scripts\azure\provision_vm.ps1
 
 If `koreacentral` cannot host the VM because of quota or SKU restrictions, the
 script automatically retries `eastus` and then `westeurope`.
+
+If the subscription has an `Allowed resource deployment regions` policy
+assignment, the script automatically intersects the preferred region order with
+that allowed-region list before it starts probing SKUs or creating the VM.
 
 ## Upload The Dataset
 

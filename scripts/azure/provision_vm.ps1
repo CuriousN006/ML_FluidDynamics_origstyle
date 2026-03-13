@@ -15,6 +15,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
 
 function Get-AzCliCommand {
     $candidates = @(
@@ -42,20 +45,48 @@ $script:AzCli = Get-AzCliCommand
 function Get-AzCliJson {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
-    $raw = & $script:AzCli @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Azure CLI command failed: az $($Arguments -join ' ')"
+    $result = Invoke-AzCliRaw -Arguments $Arguments
+    if ($result.ExitCode -ne 0) {
+        throw "Azure CLI command failed: az $($Arguments -join ' ')`n$($result.Text)"
     }
-    if ([string]::IsNullOrWhiteSpace(($raw -join ""))) {
+    if ([string]::IsNullOrWhiteSpace(($result.Stdout -join ""))) {
         return $null
     }
-    return ($raw -join "`n") | ConvertFrom-Json
+    return ($result.Stdout -join "`n") | ConvertFrom-Json
+}
+
+function Invoke-AzCliRaw {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    $stdoutPath = Join-Path $env:TEMP ("az-{0}.stdout" -f [guid]::NewGuid().ToString("N"))
+    $stderrPath = Join-Path $env:TEMP ("az-{0}.stderr" -f [guid]::NewGuid().ToString("N"))
+
+    try {
+        $process = Start-Process -FilePath $script:AzCli -ArgumentList $Arguments -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        $stdoutLines = if (Test-Path $stdoutPath) { Get-Content -Path $stdoutPath -ErrorAction SilentlyContinue } else { @() }
+        $stderrLines = if (Test-Path $stderrPath) { Get-Content -Path $stderrPath -ErrorAction SilentlyContinue } else { @() }
+
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            Stdout = @($stdoutLines)
+            Stderr = @($stderrLines)
+            Text = ((@($stdoutLines) + @($stderrLines)) -join "`n")
+        }
+    }
+    finally {
+        if (Test-Path $stdoutPath) {
+            Remove-Item -Path $stdoutPath -Force
+        }
+        if (Test-Path $stderrPath) {
+            Remove-Item -Path $stderrPath -Force
+        }
+    }
 }
 
 function Get-UsageEntry {
     param(
         [Parameter(Mandatory = $true)]$UsageItems,
-        [Parameter(Mandatory = $true)][string]$ExactLocalizedValue,
+        [AllowEmptyString()][string]$ExactLocalizedValue = "",
         [string]$LooseMatch = ""
     )
 
@@ -85,21 +116,73 @@ function Get-RequiredVCpuCount {
     throw "Could not infer the vCPU count from SKU name: $SkuName"
 }
 
+function Get-AllowedLocationsFromPolicy {
+    param([Parameter(Mandatory = $true)][string]$SubscriptionId)
+
+    $assignments = Get-AzCliJson -Arguments @(
+        "policy", "assignment", "list",
+        "--scope", "/subscriptions/$SubscriptionId",
+        "--output", "json"
+    )
+
+    foreach ($assignment in @($assignments)) {
+        if ($assignment.displayName -eq "Allowed resource deployment regions") {
+            return @($assignment.parameters.listOfAllowedLocations.value)
+        }
+    }
+
+    return @()
+}
+
+function Get-EffectiveLocations {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Preferred,
+        [Parameter(Mandatory = $true)][string[]]$Allowed
+    )
+
+    if (@($Allowed).Count -eq 0) {
+        return $Preferred
+    }
+
+    $effective = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($location in $Preferred) {
+        if ($Allowed -contains $location -and -not $effective.Contains($location)) {
+            $effective.Add($location)
+        }
+    }
+
+    foreach ($location in $Allowed) {
+        if (-not $effective.Contains($location)) {
+            $effective.Add($location)
+        }
+    }
+
+    return $effective.ToArray()
+}
+
 function Test-SkuAvailable {
     param(
         [Parameter(Mandatory = $true)][string]$Location,
         [Parameter(Mandatory = $true)][string]$SkuName
     )
 
-    $sku = Get-AzCliJson -Arguments @(
+    $skuList = Get-AzCliJson -Arguments @(
         "vm", "list-skus",
         "--location", $Location,
         "--size", $SkuName,
         "--resource-type", "virtualMachines",
         "--all",
-        "--query", "[?name=='$SkuName'] | [0]",
         "--output", "json"
     )
+
+    $sku = $null
+    foreach ($item in @($skuList)) {
+        if ($item.name -eq $SkuName) {
+            $sku = $item
+            break
+        }
+    }
 
     if ($null -eq $sku) {
         return $false
@@ -112,57 +195,69 @@ function Test-SkuAvailable {
     return @($sku.restrictions).Count -eq 0
 }
 
-function Select-TargetPlacement {
+function Get-PlacementCandidates {
     param(
         [Parameter(Mandatory = $true)][string[]]$Locations,
         [Parameter(Mandatory = $true)][string[]]$Sizes
     )
+
+    $candidates = [System.Collections.Generic.List[object]]::new()
 
     foreach ($location in $Locations) {
         Write-Host "Checking quotas for $location..."
         $usage = Get-AzCliJson -Arguments @("vm", "list-usage", "--location", $location, "--output", "json")
         $regionalEntry = Get-UsageEntry -UsageItems $usage -ExactLocalizedValue "Total Regional vCPUs"
         $t4FamilyEntry = Get-UsageEntry -UsageItems $usage -ExactLocalizedValue "" -LooseMatch "NC.*T4.*Family"
+        $quotaInfoAvailable = ($null -ne $regionalEntry) -and ($null -ne $t4FamilyEntry)
 
-        if ($null -eq $regionalEntry) {
-            Write-Warning "Skipping $location because Total Regional vCPUs quota information is missing."
-            continue
-        }
-        if ($null -eq $t4FamilyEntry) {
-            Write-Warning "Skipping $location because NC/T4 family quota information is missing."
-            continue
+        if (-not $quotaInfoAvailable) {
+            Write-Warning "Quota information is unavailable for $location. Falling back to SKU probing and VM create."
         }
 
         foreach ($size in $Sizes) {
             $requiredVCpu = Get-RequiredVCpuCount -SkuName $size
-            $regionalAvailable = [int]$regionalEntry.limit - [int]$regionalEntry.currentValue
-            $familyAvailable = [int]$t4FamilyEntry.limit - [int]$t4FamilyEntry.currentValue
+            $regionalAvailable = $null
+            $familyAvailable = $null
+            $regionalLimit = $null
+            $familyLimit = $null
 
-            if ($regionalAvailable -lt $requiredVCpu) {
-                Write-Warning "Skipping $size in $location because only $regionalAvailable regional vCPUs are available."
-                continue
-            }
-            if ($familyAvailable -lt $requiredVCpu) {
-                Write-Warning "Skipping $size in $location because only $familyAvailable NC/T4 family vCPUs are available."
-                continue
+            if ($quotaInfoAvailable) {
+                $regionalAvailable = [int]$regionalEntry.limit - [int]$regionalEntry.currentValue
+                $familyAvailable = [int]$t4FamilyEntry.limit - [int]$t4FamilyEntry.currentValue
+                $regionalLimit = [int]$regionalEntry.limit
+                $familyLimit = [int]$t4FamilyEntry.limit
+
+                if ($regionalAvailable -lt $requiredVCpu) {
+                    Write-Warning "Skipping $size in $location because only $regionalAvailable regional vCPUs are available."
+                    continue
+                }
+                if ($familyAvailable -lt $requiredVCpu) {
+                    Write-Warning "Skipping $size in $location because only $familyAvailable NC/T4 family vCPUs are available."
+                    continue
+                }
             }
 
             Write-Host "Checking SKU availability for $size in $location..."
             if (Test-SkuAvailable -Location $location -SkuName $size) {
-                return [pscustomobject]@{
+                $candidates.Add([pscustomobject]@{
                     Location = $location
                     Size = $size
                     RequiredVCpu = $requiredVCpu
-                    RegionalLimit = [int]$regionalEntry.limit
+                    QuotaInfoAvailable = $quotaInfoAvailable
+                    RegionalLimit = $regionalLimit
                     RegionalAvailable = $regionalAvailable
-                    FamilyLimit = [int]$t4FamilyEntry.limit
+                    FamilyLimit = $familyLimit
                     FamilyAvailable = $familyAvailable
-                }
+                })
             }
         }
     }
 
-    throw "No usable region/SKU combination was found in the configured priority list."
+    if ($candidates.Count -eq 0) {
+        throw "No usable region/SKU combination was found in the configured priority list."
+    }
+
+    return $candidates
 }
 
 if (-not $script:AzCli) {
@@ -176,11 +271,23 @@ if ($SubscriptionId) {
     }
 }
 
-$null = Get-AzCliJson -Arguments @("account", "show", "--output", "json")
-$placement = Select-TargetPlacement -Locations $LocationPreference -Sizes $SizePreference
+$account = Get-AzCliJson -Arguments @("account", "show", "--output", "json")
+$allowedLocations = Get-AllowedLocationsFromPolicy -SubscriptionId $account.id
+$effectiveLocations = Get-EffectiveLocations -Preferred $LocationPreference -Allowed $allowedLocations
 
-Write-Host "Selected location: $($placement.Location)"
-Write-Host "Selected size: $($placement.Size)"
+if (@($allowedLocations).Count -gt 0) {
+    Write-Host "Subscription-allowed deployment regions:"
+    foreach ($location in $allowedLocations) {
+        Write-Host " - $location"
+    }
+}
+
+$placements = Get-PlacementCandidates -Locations $effectiveLocations -Sizes $SizePreference
+
+Write-Host "Placement candidates:"
+foreach ($candidate in $placements) {
+    Write-Host " - $($candidate.Location) / $($candidate.Size)"
+}
 
 $templatePath = Join-Path $PSScriptRoot "cloud-init.yaml.tmpl"
 $customDataPath = Join-Path $env:TEMP "$VmName-cloud-init.yaml"
@@ -189,29 +296,51 @@ $customData = $template.Replace("__ADMIN_USERNAME__", $AdminUsername)
 $customData = $customData.Replace("__REPO_URL__", $RepoUrl)
 $customData = $customData.Replace("__BRANCH__", $Branch)
 $customData = $customData.Replace("__REPO_DIR__", $RepoDir)
-Set-Content -Path $customDataPath -Value $customData -Encoding utf8
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($customDataPath, $customData, $utf8NoBom)
 
 try {
-    & $script:AzCli group create --name $ResourceGroupName --location $placement.Location --output json | Out-Null
+    $resourceGroupLocation = $placements[0].Location
+    & $script:AzCli group create --name $ResourceGroupName --location $resourceGroupLocation --output json | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to create or refresh resource group $ResourceGroupName."
     }
 
-    $vm = Get-AzCliJson -Arguments @(
-        "vm", "create",
-        "--resource-group", $ResourceGroupName,
-        "--name", $VmName,
-        "--location", $placement.Location,
-        "--image", "Ubuntu2204",
-        "--size", $placement.Size,
-        "--admin-username", $AdminUsername,
-        "--authentication-type", "ssh",
-        "--generate-ssh-keys",
-        "--public-ip-sku", "Standard",
-        "--storage-sku", "Premium_LRS",
-        "--custom-data", $customDataPath,
-        "--output", "json"
-    )
+    $placement = $null
+    $vm = $null
+    $lastFailure = $null
+
+    foreach ($candidate in $placements) {
+        Write-Host "Attempting VM create in $($candidate.Location) with $($candidate.Size)..."
+        $createResult = Invoke-AzCliRaw -Arguments @(
+            "vm", "create",
+            "--resource-group", $ResourceGroupName,
+            "--name", $VmName,
+            "--location", $candidate.Location,
+            "--image", "Ubuntu2204",
+            "--size", $candidate.Size,
+            "--admin-username", $AdminUsername,
+            "--authentication-type", "ssh",
+            "--generate-ssh-keys",
+            "--public-ip-sku", "Standard",
+            "--storage-sku", "Premium_LRS",
+            "--custom-data", $customDataPath,
+            "--output", "json"
+        )
+
+        if ($createResult.ExitCode -eq 0) {
+            $placement = $candidate
+            $vm = $createResult.Text | ConvertFrom-Json
+            break
+        }
+
+        $lastFailure = $createResult.Text
+        Write-Warning "VM create failed for $($candidate.Location) / $($candidate.Size). Trying the next candidate."
+    }
+
+    if ($null -eq $vm -or $null -eq $placement) {
+        throw "VM creation failed for every candidate. Last Azure CLI output:`n$lastFailure"
+    }
 
     & $script:AzCli vm auto-shutdown --resource-group $ResourceGroupName --name $VmName --time $AutoShutdownTime --timezone $AutoShutdownTimezone | Out-Null
     if ($LASTEXITCODE -ne 0) {
