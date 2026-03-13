@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -20,6 +21,8 @@ RESULT_FIELDS = [
     "status",
     "description",
 ]
+
+IDEA_PREFIX_RE = re.compile(r"^\[idea:(?P<idea_key>[a-z0-9_]+)\]\s*(?P<description>.*)$")
 
 
 @dataclass
@@ -41,6 +44,24 @@ class ExperimentRecord:
     failure_reason: str = ""
     next_hypothesis: str = ""
     config_summary: tuple[str, ...] = field(default_factory=tuple)
+
+
+def _extract_idea_key_and_description(description: str) -> tuple[str | None, str]:
+    normalized = description.strip()
+    match = IDEA_PREFIX_RE.match(normalized)
+    if match is None:
+        return None, normalized
+    cleaned_description = match.group("description").strip()
+    if not cleaned_description:
+        cleaned_description = normalized
+    return match.group("idea_key"), cleaned_description
+
+
+def _format_experiment_label(record: ExperimentRecord) -> str:
+    idea_key, cleaned_description = _extract_idea_key_and_description(record.description)
+    if idea_key:
+        return f"exp-{record.experiment_id:04d} | {idea_key} | {cleaned_description}"
+    return f"exp-{record.experiment_id:04d} | {cleaned_description}"
 
 
 def init_results_file(paths: ProjectPaths) -> None:
@@ -165,6 +186,8 @@ def append_result(paths: ProjectPaths, record: ExperimentRecord) -> None:
 
 def write_experiment_markdown(paths: ProjectPaths, record: ExperimentRecord) -> None:
     path = paths.experiment_dir / f"exp-{record.experiment_id:04d}.md"
+    idea_key, cleaned_description = _extract_idea_key_and_description(record.description)
+    idea_key_line = f"- Idea key: {idea_key}\n" if idea_key else ""
     if record.config_summary:
         changes_block = "\n".join(f"- {line}" for line in record.config_summary)
     else:
@@ -180,10 +203,11 @@ def write_experiment_markdown(paths: ProjectPaths, record: ExperimentRecord) -> 
 - Run tag: {record.run_tag}
 - Commit: {record.commit}
 - Status: {record.status}
+{idea_key_line}
 
 ## Purpose
 
-{record.description}
+{cleaned_description}
 
 ## Changes
 
@@ -236,19 +260,21 @@ def refresh_state(paths: ProjectPaths) -> None:
             ]
         )
     else:
+        best_idea_key, best_description = _extract_idea_key_and_description(best.description)
         lines.extend(
             [
                 f"- Experiment: exp-{best.experiment_id:04d}",
+                *([f"- Idea key: {best_idea_key}"] if best_idea_key else []),
                 f"- Commit: {best.commit}",
                 f"- Primary score: {best.primary_score:.6f}",
-                f"- Notes: {best.description}",
+                f"- Notes: {best_description}",
             ]
         )
     lines.extend(["", "## Recent Experiments", ""])
     if recent:
         for record in recent:
             lines.append(
-                f"- exp-{record.experiment_id:04d}: {record.status}, score={record.primary_score:.6f}, {record.description}"
+                f"- {_format_experiment_label(record)} | {record.status} | score={record.primary_score:.6f}"
             )
     else:
         lines.append("- None yet.")
@@ -284,7 +310,7 @@ def refresh_run_index(paths: ProjectPaths) -> None:
     if records:
         for record in records:
             lines.append(
-                f"- exp-{record.experiment_id:04d} | {record.status} | score={record.primary_score:.6f} | {record.description}"
+                f"- {_format_experiment_label(record)} | {record.status} | score={record.primary_score:.6f}"
             )
     else:
         lines.append("- Pending initialization.")
@@ -292,7 +318,7 @@ def refresh_run_index(paths: ProjectPaths) -> None:
     if best is None:
         lines.append("- None yet.")
     else:
-        lines.append(f"- Current best: exp-{best.experiment_id:04d} ({best.primary_score:.6f})")
+        lines.append(f"- Current best: {_format_experiment_label(best)} ({best.primary_score:.6f})")
     lines.extend(["", "## Open Risks", ""])
     if any(record.status == "crash" for record in records):
         lines.append("- Recent crashes or timeouts need follow-up.")
