@@ -66,6 +66,7 @@ py -3.12 -m venv .venv
 - `run-current` and `baseline-check` are for baseline validation or debugging, not for the main research loop.
 - `apply-candidate` commits only `src/` and `tests/` changes, records the run, and restores the previous code automatically when the result is discarded or crashes.
 - Idea keys should use `lower_snake_case`. Use a material version suffix such as `_v1`, `_v2` when the formulation itself changes.
+- Nonlinear runs do not save `autoencoder.pt` by default. Use `python -m mlfd.run_nonlinear --save-checkpoint true` only when you explicitly need a checkpoint artifact.
 - `run-campaign` is a bounded helper for unattended AE-screening, not the main research workflow.
 - Some sibling worktrees currently reuse `D:\Projects\ML_FluidDynamics_Project\ML_FluidDynamics\.venv`; if a side worktree has no local `.venv`, run that interpreter with `PYTHONPATH=<worktree>\src`.
 - Existing PNG dumps are treated as derived visualizations, not primary training data.

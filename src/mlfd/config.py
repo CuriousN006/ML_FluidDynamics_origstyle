@@ -197,6 +197,7 @@ class NonlinearConfig:
     num_preview_images: int = 4
     device: str = "auto"
     deterministic: bool = True
+    save_checkpoint: bool = False
 
     def smoke(self) -> "NonlinearConfig":
         return replace(

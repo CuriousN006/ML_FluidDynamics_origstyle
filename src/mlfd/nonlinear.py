@@ -149,6 +149,12 @@ def compute_ae_score(recon_rmse: float, floor_t100: float, floor_t150: float) ->
     return float((0.5 * recon_rmse) + (0.25 * floor_t100) + (0.25 * floor_t150))
 
 
+def _maybe_save_autoencoder_checkpoint(model: nn.Module, output_dir: Path, *, save_checkpoint: bool) -> None:
+    if not save_checkpoint:
+        return
+    torch.save(model.state_dict(), output_dir / "autoencoder.pt")
+
+
 def _build_loader(
     dataset: Dataset[torch.Tensor],
     batch_size: int,
@@ -749,7 +755,7 @@ def run_nonlinear_pipeline(
             },
         }
         write_json(output_dir / "metrics.json", metrics)
-        torch.save(autoencoder.state_dict(), output_dir / "autoencoder.pt")
+        _maybe_save_autoencoder_checkpoint(autoencoder, output_dir, save_checkpoint=config.save_checkpoint)
         return metrics
 
     dyn_metrics = _train_dynamics(latents, bundle, autoencoder, stats, config, output_dir, device)
@@ -811,5 +817,5 @@ def run_nonlinear_pipeline(
         },
     }
     write_json(output_dir / "metrics.json", metrics)
-    torch.save(autoencoder.state_dict(), output_dir / "autoencoder.pt")
+    _maybe_save_autoencoder_checkpoint(autoencoder, output_dir, save_checkpoint=config.save_checkpoint)
     return metrics

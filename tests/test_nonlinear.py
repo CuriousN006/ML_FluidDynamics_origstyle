@@ -5,7 +5,13 @@ import torch
 from torch import nn
 
 from mlfd.config import NonlinearConfig
-from mlfd.nonlinear import _dynamics_validation_terms, _gaussian_blur, _latent_rollout_loss, compute_ae_score
+from mlfd.nonlinear import (
+    _dynamics_validation_terms,
+    _gaussian_blur,
+    _latent_rollout_loss,
+    _maybe_save_autoencoder_checkpoint,
+    compute_ae_score,
+)
 
 
 class IdentityDynamics(nn.Module):
@@ -43,3 +49,19 @@ def test_gaussian_blur_preserves_shape() -> None:
     field = torch.randn(2, 1, 32, 16)
     blurred = _gaussian_blur(field, kernel_size=9, sigma=2.0)
     assert blurred.shape == field.shape
+
+
+def test_maybe_save_autoencoder_checkpoint_defaults_to_no_file(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    model = nn.Linear(4, 2)
+
+    _maybe_save_autoencoder_checkpoint(model, tmp_path, save_checkpoint=False)
+
+    assert not (tmp_path / "autoencoder.pt").exists()
+
+
+def test_maybe_save_autoencoder_checkpoint_writes_file_when_enabled(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    model = nn.Linear(4, 2)
+
+    _maybe_save_autoencoder_checkpoint(model, tmp_path, save_checkpoint=True)
+
+    assert (tmp_path / "autoencoder.pt").exists()

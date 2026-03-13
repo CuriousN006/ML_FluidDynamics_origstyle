@@ -44,6 +44,7 @@ def test_apply_cli_overrides_updates_scheduler_and_regularizers() -> None:
         latent_l1_weight=5e-4,
         dyn_l2_weight=5e-5,
         deterministic=False,
+        save_checkpoint=True,
         device=None,
     )
     config = apply_cli_overrides(NonlinearConfig(), args)
@@ -73,3 +74,4 @@ def test_apply_cli_overrides_updates_scheduler_and_regularizers() -> None:
     assert config.latent_l1_weight == 5e-4
     assert config.dyn_l2_weight == 5e-5
     assert config.deterministic is False
+    assert config.save_checkpoint is True

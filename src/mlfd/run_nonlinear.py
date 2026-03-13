@@ -60,6 +60,7 @@ def apply_cli_overrides(config: NonlinearConfig, args: Namespace) -> NonlinearCo
         "dyn_l2_weight": args.dyn_l2_weight,
         "device": args.device,
         "deterministic": args.deterministic,
+        "save_checkpoint": args.save_checkpoint,
     }
     for key, value in override_fields.items():
         if value is not None:
@@ -186,6 +187,12 @@ def main() -> None:
         type=_parse_bool,
         default=None,
         help="Override deterministic torch behavior. Use true or false.",
+    )
+    parser.add_argument(
+        "--save-checkpoint",
+        type=_parse_bool,
+        default=None,
+        help="Persist autoencoder.pt for this run. Defaults to false.",
     )
     parser.add_argument("--device", default=None, help="Explicit torch device.")
     args = parser.parse_args()
