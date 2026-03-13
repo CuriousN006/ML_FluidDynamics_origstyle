@@ -43,9 +43,9 @@ py -3.12 -m venv .venv
 ## Current Worktree
 
 - Branch: `codex/autoresearch/20260311-fluid-rtx3070-latent-sweep`
-- Role: current nonlinear reference branch across the sibling worktrees.
-- Current best: `exp-0051` with `primary_score=0.000565`.
-- Preferred starting point for new AE-floor, decoder, or latent-space searches.
+- Role: isolated autonomous sandbox cloned from the nonlinear reference branch.
+- Imported reference: `exp-0051` with `primary_score=0.000565`.
+- Preferred local workspace for original-style agentic autoresearch before promoting anything back to sibling worktrees.
 
 ## Notes
 
