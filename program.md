@@ -1,6 +1,9 @@
 # Fluid Autoresearch Program
 
-This file is the human-authored charter for autonomous research in this repo.
+This workspace follows the original `karpathy/autoresearch` style: the agent is
+the researcher. It should keep reading the current code, editing the nonlinear
+pipeline, running experiments, judging the result, and continuing until the
+human interrupts it.
 
 ## Worktree Scope
 
@@ -60,41 +63,80 @@ Reference metrics:
 - `rmse_t150=0.018893`
 - `ae_floor_rmse_t150=0.018927`
 
-## Locked Lessons
+## In-Scope Files
 
-1. Portrait layout is not optional for the nonlinear mainline.
-2. Residual linear dynamics is better than the old MLP-only dynamics on the portrait baseline.
-3. The coarse-to-fine `residual_refine` AE is the current best family in this budget.
-4. `latent_dim=32` beats `latent_dim=24` on the recovered pipeline.
-5. `latent_dim=48` is a regression on this architecture.
-6. `rollout_loss_weight=0.15` remains the best value around the latent-32 winner.
-7. `latent_l1_weight=1e-4` still matters more than `dyn_l2_weight`.
-8. Strong regularization still destroys long-horizon rollout even when one-step reconstruction looks acceptable.
-9. The remaining DMD gap is now mostly an AE-floor problem, not a dynamics instability problem.
+Read these before major changes:
 
-## Suggested Experiment Order
+- `README.md`
+- `AGENTS.md`
+- `program.md`
+- `research/state.md`
+- `research/final_report.md`
+- `src/mlfd/config.py`
+- `src/mlfd/run_nonlinear.py`
+- `src/mlfd/models.py`
+- `src/mlfd/nonlinear.py`
+- `src/mlfd/autoresearch.py`
 
-1. Preserve `exp-0051` as the reference baseline and compare every new run directly against it.
-2. Do not revisit the old landscape MLP stack except for debugging.
-3. If more improvement is needed, target the AE floor directly:
-   - lightweight decoder-side ideas
-   - AE-only screening before full rollout promotion
-   - narrow hyperparameter searches around the winning family
-4. Only keep changes that improve `primary_score`, or that preserve the score while clearly lowering VRAM or runtime.
+## Allowed Changes
 
-## Runtime Budget
+- Nonlinear model architecture
+- Decoder or representation design
+- Latent dynamics implementation
+- Training schedule and hyperparameters
+- AE-only screening flow
+- Autoresearch helper code in this sandbox if it helps the loop run more cleanly
 
-- Hard timeout per experiment: 12 minutes.
-- Target runtime per experiment: 10 minutes.
-- Campaign budget: 1 baseline plus up to 24 additional trials.
-- For unattended local searches, prefer `python -m mlfd.autoresearch run-campaign` with a stop file over manually relaunching one experiment at a time.
+## Forbidden Changes
+
+- Changing the semantics of `primary_score`
+- Changing the fixed dataset split logic to make results incomparable
+- Quietly rewriting or deleting past experiment history
+- Treating imported results as if they were discovered locally
+
+## Core Loop
+
+Loop until interrupted by the human:
+
+1. Read the latest research memory and identify the current best result.
+2. Form one concrete hypothesis.
+3. Edit the nonlinear code directly.
+4. Run a single measured experiment.
+5. Check the result against the current best.
+6. Keep the change if it wins, otherwise discard it and move on.
+7. Record the outcome in the normal research memory.
+8. Continue immediately to the next idea.
+
+The primary command for a single fully logged experiment is:
+
+```powershell
+python -m mlfd.autoresearch run-current --description "<what changed>" --next-hypothesis "<next idea>"
+```
+
+Use `python -m mlfd.autoresearch search-ae ...` or `run-campaign ...` only as helper tools for cheap AE-floor screening. They are not the main research loop. The main loop is still agent-driven code editing plus keep/discard judgment.
 
 ## Keep/Discard Policy
 
 - Better `primary_score`: keep.
 - Worse `primary_score`: discard.
-- Within 0.25%: keep only if code is simpler or GPU memory is at least 5% lower.
+- Within 0.25%: keep only if the code is simpler or GPU memory is at least 5% lower.
 - Crash or timeout: log it and move on.
+
+## Runtime Budget
+
+- Hard timeout per experiment: 12 minutes.
+- Target runtime per experiment: 10 minutes.
+- Prefer cheap AE-only screening before full rollout promotion.
+
+## Safety Valves
+
+This sandbox intentionally supports bounded helper loops even though the main mode is open-ended agentic research.
+
+- `run-campaign --max-rounds N` stops after `N` rounds.
+- `run-campaign --max-hours H` stops after `H` wall-clock hours.
+- `run-campaign` also stops when its stop file appears.
+
+These are guardrails for unattended helper runs, not replacements for the main autoresearch workflow.
 
 ## Logging Requirements
 
