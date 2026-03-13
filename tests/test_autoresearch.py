@@ -1,12 +1,27 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
 import pytest
 
-from mlfd.autoresearch import _parse_family_cycle, _run_campaign
+from mlfd.autoresearch import (
+    _collect_candidate_changes,
+    _git_commit_candidate,
+    _git_head_commit,
+    _parse_family_cycle,
+    _restore_discarded_candidate,
+    _run_campaign,
+)
 from mlfd.config import AutoresearchConfig, ProjectPaths
 from mlfd.experiments import build_record, init_results_file, load_records, record_experiment
+from mlfd.utils import short_git_commit
+
+
+def _init_git_repo(root: Path) -> None:
+    subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=root, check=True, capture_output=True, text=True)
 
 
 def test_parse_family_cycle_validates_input() -> None:
@@ -15,6 +30,71 @@ def test_parse_family_cycle_validates_input() -> None:
         _parse_family_cycle("")
     with pytest.raises(ValueError):
         _parse_family_cycle("unknown")
+
+
+def test_collect_candidate_changes_ignores_runtime_memory(tmp_path: Path) -> None:
+    (tmp_path / "CYLINDER_ALL.mat").write_text("stub", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='tmp'\nversion='0.0.0'\n", encoding="utf-8")
+    (tmp_path / "src" / "mlfd").mkdir(parents=True)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "research" / "experiments").mkdir(parents=True)
+    (tmp_path / "output").mkdir()
+    (tmp_path / "src" / "mlfd" / "models.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "results.tsv").write_text("commit\n", encoding="utf-8")
+    _init_git_repo(tmp_path)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+
+    (tmp_path / "src" / "mlfd" / "models.py").write_text("x = 2\n", encoding="utf-8")
+    (tmp_path / "research" / "state.md").write_text("runtime note\n", encoding="utf-8")
+    (tmp_path / "results.tsv").write_text("runtime ledger\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("oops\n", encoding="utf-8")
+
+    paths = ProjectPaths(root=tmp_path, run_tag="unit-test")
+    candidate_entries, out_of_scope = _collect_candidate_changes(paths)
+
+    assert candidate_entries == [{"status": "M", "path": "src/mlfd/models.py"}]
+    assert out_of_scope == ["README.md"]
+
+
+def test_restore_discarded_candidate_keeps_runtime_logs(tmp_path: Path) -> None:
+    (tmp_path / "CYLINDER_ALL.mat").write_text("stub", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='tmp'\nversion='0.0.0'\n", encoding="utf-8")
+    (tmp_path / "src" / "mlfd").mkdir(parents=True)
+    (tmp_path / "research").mkdir()
+    (tmp_path / "src" / "mlfd" / "models.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "results.tsv").write_text("commit\n", encoding="utf-8")
+    _init_git_repo(tmp_path)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+
+    base_commit = _git_head_commit(tmp_path)
+    (tmp_path / "src" / "mlfd" / "models.py").write_text("x = 2\n", encoding="utf-8")
+    candidate_entries = [{"status": "M", "path": "src/mlfd/models.py"}]
+    _git_commit_candidate(tmp_path, ["src/mlfd/models.py"], "candidate")
+    (tmp_path / "results.tsv").write_text("new result\n", encoding="utf-8")
+
+    _restore_discarded_candidate(tmp_path, base_commit, candidate_entries)
+
+    assert (tmp_path / "src" / "mlfd" / "models.py").read_text(encoding="utf-8") == "x = 1\n"
+    assert (tmp_path / "results.tsv").read_text(encoding="utf-8") == "new result\n"
+    assert _git_head_commit(tmp_path) == base_commit
+
+
+def test_short_git_commit_ignores_runtime_paths(tmp_path: Path) -> None:
+    (tmp_path / "CYLINDER_ALL.mat").write_text("stub", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='tmp'\nversion='0.0.0'\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "results.tsv").write_text("commit\n", encoding="utf-8")
+    _init_git_repo(tmp_path)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+
+    commit = short_git_commit(tmp_path)
+    (tmp_path / "results.tsv").write_text("dirty\n", encoding="utf-8")
+
+    assert short_git_commit(tmp_path).endswith("-dirty")
+    assert short_git_commit(tmp_path, ignored_paths=("results.tsv",)) == commit
 
 
 def test_run_campaign_stops_immediately_when_stop_file_exists(tmp_path: Path) -> None:

@@ -28,6 +28,7 @@ py -3.12 -m venv .venv
 - `python -m mlfd.run_linear`: generate the linear baseline artifacts.
 - `python -m mlfd.run_nonlinear`: train/evaluate the nonlinear baseline.
 - `python -m mlfd.autoresearch init-run`: initialize a new research campaign.
+- `python -m mlfd.autoresearch apply-candidate`: commit the current code change, run it once, and automatically keep or discard it.
 - `python -m mlfd.autoresearch run-current`: execute and log the current code as an experiment.
 - `python -m mlfd.autoresearch run-campaign`: keep running unattended AE-search rounds until `--max-rounds`, `--max-hours`, or a stop file ends the campaign.
 
@@ -50,7 +51,8 @@ py -3.12 -m venv .venv
 
 - The runtime assumes `CYLINDER_ALL.mat` is present in the repo root.
 - This clone is intended as an isolated autonomous sandbox. Review local results here before importing anything back into the sibling worktrees.
-- The primary workflow in this clone is original-style agentic autoresearch: the coding agent edits the nonlinear code, runs one experiment, judges keep/discard, and repeats.
+- The primary workflow in this clone is original-style agentic autoresearch: the coding agent edits the nonlinear code, uses `apply-candidate`, and repeats.
+- `apply-candidate` commits only `src/` and `tests/` changes, records the run, and restores the previous code automatically when the result is discarded or crashes.
 - `run-campaign` is a bounded helper for unattended AE-screening, not the main research workflow.
 - Some sibling worktrees currently reuse `D:\Projects\ML_FluidDynamics_Project\ML_FluidDynamics\.venv`; if a side worktree has no local `.venv`, run that interpreter with `PYTHONPATH=<worktree>\src`.
 - Existing PNG dumps are treated as derived visualizations, not primary training data.

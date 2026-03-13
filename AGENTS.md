@@ -51,7 +51,7 @@ Always trust the scope/status notes at the top of those files before reading the
 - Prefer cheap `AE`-only screening before full rollout promotion.
 - Focus next effort on decoder-side or representation-side ideas that can lower the AE floor at `t=100` and `t=150`.
 - Do not spend another campaign on pure dynamics complexity unless a branch has evidence that the representation bottleneck is no longer the limiter.
-- Run this clone in original-style agentic loops: edit code, execute one experiment, judge keep/discard, update research memory, and continue.
+- Run this clone in original-style agentic loops: edit code under `src/` or `tests/`, execute `python -m mlfd.autoresearch apply-candidate ...`, judge the result, and continue.
 - Treat `run-campaign` only as a bounded helper for unattended AE screening.
 
 ## Current Worktree

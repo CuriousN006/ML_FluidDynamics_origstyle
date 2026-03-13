@@ -82,6 +82,21 @@ class ProjectPaths:
     def branch_name(self) -> str:
         return f"codex/autoresearch/{self.run_tag}"
 
+    @property
+    def runtime_git_ignored_paths(self) -> tuple[str, ...]:
+        return (
+            "results.tsv",
+            "research",
+            "output",
+        )
+
+    @property
+    def candidate_code_prefixes(self) -> tuple[str, ...]:
+        return (
+            "src/",
+            "tests/",
+        )
+
     def ensure_directories(self, extra: Iterable[Path] | None = None) -> None:
         directories = [
             self.output_dir,

@@ -11,6 +11,23 @@ from typing import Any
 import numpy as np
 
 
+def run_git(
+    root: Path,
+    args: list[str],
+    *,
+    check: bool = True,
+    capture_output: bool = True,
+    text: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=root,
+        check=check,
+        capture_output=capture_output,
+        text=text,
+    )
+
+
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -47,22 +64,14 @@ def set_seed(seed: int, deterministic: bool = True) -> None:
         pass
 
 
-def short_git_commit(root: Path) -> str:
+def short_git_commit(root: Path, ignored_paths: tuple[str, ...] = ()) -> str:
     try:
-        commit_result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        status_result = subprocess.run(
-            ["git", "status", "--short"],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        commit_result = run_git(root, ["rev-parse", "--short", "HEAD"])
+        status_args = ["status", "--short", "--untracked-files=all"]
+        if ignored_paths:
+            status_args.extend(["--", "."])
+            status_args.extend(f":(exclude){path}" for path in ignored_paths)
+        status_result = run_git(root, status_args)
         commit = commit_result.stdout.strip()
         if status_result.stdout.strip():
             return f"{commit}-dirty"
@@ -73,13 +82,7 @@ def short_git_commit(root: Path) -> str:
 
 def git_branch(root: Path) -> str:
     try:
-        result = subprocess.run(
-            ["git", "branch", "--show-current"],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        result = run_git(root, ["branch", "--show-current"])
         return result.stdout.strip()
     except (FileNotFoundError, subprocess.CalledProcessError):
         return ""

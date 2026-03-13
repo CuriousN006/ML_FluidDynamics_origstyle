@@ -8,9 +8,18 @@ from pathlib import Path
 
 from .config import AutoresearchConfig, ProjectPaths
 from .experiments import best_record, build_record, init_results_file, load_records, record_experiment
-from .utils import read_json, utc_timestamp, write_json
+from .utils import read_json, run_git, utc_timestamp, write_json
 
 SEARCH_FAMILIES = ("residual", "residual_refine", "residual_multiscale")
+
+
+def _normalize_relpath(path: str) -> str:
+    return path.replace("\\", "/").lstrip("./")
+
+
+def _is_under_prefix(path: str, prefixes: tuple[str, ...]) -> bool:
+    normalized = _normalize_relpath(path)
+    return any(normalized == prefix.rstrip("/") or normalized.startswith(prefix) for prefix in prefixes)
 
 
 def _append_optional(command: list[str], flag: str, value: object | None) -> None:
@@ -166,6 +175,89 @@ def _display_path(path: Path, root: Path) -> str:
         return str(path)
 
 
+def _git_head_commit(root: Path) -> str:
+    return run_git(root, ["rev-parse", "HEAD"]).stdout.strip()
+
+
+def _git_diff_entries(root: Path) -> list[dict[str, str]]:
+    result = run_git(root, ["diff", "--name-status", "HEAD", "--"])
+    entries: list[dict[str, str]] = []
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        status = parts[0]
+        if status.startswith(("R", "C")):
+            raise RuntimeError(f"Renames/copies are not supported in candidate mode: {line}")
+        if len(parts) < 2:
+            continue
+        entries.append({"status": status[:1], "path": _normalize_relpath(parts[1])})
+    return entries
+
+
+def _git_untracked_paths(root: Path) -> list[str]:
+    result = run_git(root, ["ls-files", "--others", "--exclude-standard"])
+    return [_normalize_relpath(line) for line in result.stdout.splitlines() if line.strip()]
+
+
+def _collect_candidate_changes(paths: ProjectPaths) -> tuple[list[dict[str, str]], list[str]]:
+    ignored_prefixes = tuple(f"{path.rstrip('/')}/" for path in paths.runtime_git_ignored_paths if path not in {"results.tsv"})
+    ignored_paths = set(paths.runtime_git_ignored_paths)
+    entries: list[dict[str, str]] = []
+    out_of_scope: list[str] = []
+
+    for item in _git_diff_entries(paths.root):
+        relpath = item["path"]
+        if relpath in ignored_paths or _is_under_prefix(relpath, ignored_prefixes):
+            continue
+        if _is_under_prefix(relpath, paths.candidate_code_prefixes):
+            entries.append(item)
+        else:
+            out_of_scope.append(relpath)
+
+    for relpath in _git_untracked_paths(paths.root):
+        if relpath in ignored_paths or _is_under_prefix(relpath, ignored_prefixes):
+            continue
+        if _is_under_prefix(relpath, paths.candidate_code_prefixes):
+            entries.append({"status": "A", "path": relpath})
+        else:
+            out_of_scope.append(relpath)
+
+    deduped_entries: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in entries:
+        key = (item["status"], item["path"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped_entries.append(item)
+
+    deduped_out_of_scope: list[str] = []
+    seen_paths: set[str] = set()
+    for relpath in out_of_scope:
+        if relpath in seen_paths:
+            continue
+        seen_paths.add(relpath)
+        deduped_out_of_scope.append(relpath)
+    return deduped_entries, deduped_out_of_scope
+
+
+def _git_commit_candidate(root: Path, candidate_paths: list[str], message: str) -> str:
+    run_git(root, ["add", "--", *candidate_paths], capture_output=True)
+    run_git(root, ["commit", "-m", message], capture_output=True)
+    return _git_head_commit(root)
+
+
+def _restore_discarded_candidate(root: Path, base_commit: str, candidate_entries: list[dict[str, str]]) -> None:
+    run_git(root, ["reset", "--mixed", base_commit], capture_output=True)
+    added_paths = [item["path"] for item in candidate_entries if item["status"] == "A"]
+    restore_paths = [item["path"] for item in candidate_entries if item["status"] != "A"]
+    if restore_paths:
+        run_git(root, ["restore", "--source=HEAD", "--worktree", "--", *restore_paths], capture_output=True)
+    if added_paths:
+        run_git(root, ["clean", "-fd", "--", *added_paths], capture_output=True)
+
+
 def _sample_search_params(trial: object, family: str) -> dict[str, object]:
     import optuna
 
@@ -234,6 +326,46 @@ def _enqueue_warm_start_trials(study: object, family: str) -> None:
         )
         return
     study.enqueue_trial({**baseline_trial, "coordconv": True})
+
+
+def _execute_logged_run(
+    paths: ProjectPaths,
+    config: AutoresearchConfig,
+    *,
+    command: list[str],
+    output_tag: str,
+    description: str,
+    next_hypothesis: str,
+) -> object:
+    try:
+        metrics, log_path = _run_and_collect(paths, command, output_tag, config.timeout_seconds)
+        failure_reason = ""
+        status = None
+    except Exception as exc:  # noqa: BLE001
+        metrics = {
+            "primary_score": 0.0,
+            "recon_rmse": 0.0,
+            "rmse_t100": 0.0,
+            "rmse_t150": 0.0,
+            "peak_memory_gb": 0.0,
+            "wall_seconds": float(config.timeout_seconds),
+        }
+        failure_reason = str(exc)
+        status = "crash"
+        log_path = str((paths.run_log_dir / f"{output_tag}.log").relative_to(paths.root))
+    record = build_record(
+        paths,
+        config,
+        metrics,
+        description=description,
+        status=status,
+        failure_reason=failure_reason,
+        next_hypothesis=next_hypothesis,
+        metrics_path=str((paths.nonlinear_dir / output_tag / "metrics.json").relative_to(paths.root)),
+        log_path=log_path,
+    )
+    record_experiment(paths, record)
+    return record
 
 
 def _run_search_ae(
@@ -592,6 +724,22 @@ def main() -> None:
     run_parser.add_argument("--deterministic", choices=["true", "false"], default=None)
     run_parser.add_argument("--device", default=None)
 
+    candidate_parser = subparsers.add_parser(
+        "apply-candidate",
+        help="Commit the current candidate code change, run it once, and automatically keep or discard it.",
+    )
+    candidate_parser.add_argument("--description", required=True)
+    candidate_parser.add_argument("--run-tag", default=ProjectPaths().run_tag)
+    candidate_parser.add_argument("--next-hypothesis", default="")
+    candidate_parser.add_argument("--commit-message", default=None)
+    candidate_parser.add_argument("--smoke", action="store_true")
+    candidate_parser.add_argument("--device", default=None)
+    candidate_parser.add_argument(
+        "--allow-clean",
+        action="store_true",
+        help="Allow a clean-tree baseline run without creating a candidate commit.",
+    )
+
     search_parser = subparsers.add_parser("search-ae", help="Run an Optuna/TPE AE-only search and full-evaluate the top candidates.")
     search_parser.add_argument("--run-tag", default=ProjectPaths().run_tag)
     search_parser.add_argument("--study-name", default="residual-multiscale")
@@ -626,6 +774,55 @@ def main() -> None:
     if args.command == "init-run":
         print(f"Initialized run scaffold for {paths.run_tag}")
         print(f"Expected branch: {paths.branch_name}")
+        return
+
+    if args.command == "apply-candidate":
+        config = AutoresearchConfig(run_tag=paths.run_tag)
+        candidate_entries, out_of_scope = _collect_candidate_changes(paths)
+        if out_of_scope:
+            raise RuntimeError(
+                "Candidate mode found modified files outside src/tests and outside runtime memory paths: "
+                + ", ".join(out_of_scope)
+            )
+        command = _default_command(f"exp-{len(load_records(paths)) + 1:04d}", args.smoke, device=args.device)
+        if not candidate_entries:
+            if not args.allow_clean:
+                raise RuntimeError("No candidate code changes found under src/ or tests/.")
+            record = _execute_logged_run(
+                paths,
+                config,
+                command=command,
+                output_tag=f"exp-{len(load_records(paths)) + 1:04d}",
+                description=args.description,
+                next_hypothesis=args.next_hypothesis,
+            )
+            print(f"Recorded exp-{record.experiment_id:04d}")
+            print(f"Status: {record.status}")
+            print(f"Primary score: {record.primary_score:.6f}")
+            return
+
+        base_commit = _git_head_commit(paths.root)
+        candidate_paths = [item["path"] for item in candidate_entries]
+        commit_message = args.commit_message or args.description
+        candidate_commit = _git_commit_candidate(paths.root, candidate_paths, commit_message)
+        output_tag = f"exp-{len(load_records(paths)) + 1:04d}"
+        command = _default_command(output_tag, args.smoke, device=args.device)
+        record = _execute_logged_run(
+            paths,
+            config,
+            command=command,
+            output_tag=output_tag,
+            description=args.description,
+            next_hypothesis=args.next_hypothesis,
+        )
+        if record.status != "keep":
+            _restore_discarded_candidate(paths.root, base_commit, candidate_entries)
+            print(f"Discarded candidate {candidate_commit[:7]} and restored code to {base_commit[:7]}")
+        else:
+            print(f"Kept candidate commit {candidate_commit[:7]}")
+        print(f"Recorded exp-{record.experiment_id:04d}")
+        print(f"Status: {record.status}")
+        print(f"Primary score: {record.primary_score:.6f}")
         return
 
     if args.command == "search-ae":
@@ -711,34 +908,14 @@ def main() -> None:
         deterministic=None if args.deterministic is None else args.deterministic == "true",
         device=args.device,
     )
-    try:
-        metrics, log_path = _run_and_collect(paths, command, output_tag, config.timeout_seconds)
-        failure_reason = ""
-        status = None
-    except Exception as exc:  # noqa: BLE001
-        metrics = {
-            "primary_score": 0.0,
-            "recon_rmse": 0.0,
-            "rmse_t100": 0.0,
-            "rmse_t150": 0.0,
-            "peak_memory_gb": 0.0,
-            "wall_seconds": float(config.timeout_seconds),
-        }
-        failure_reason = str(exc)
-        status = "crash"
-        log_path = str((paths.run_log_dir / f"{output_tag}.log").relative_to(paths.root))
-    record = build_record(
+    record = _execute_logged_run(
         paths,
         config,
-        metrics,
+        command=command,
+        output_tag=output_tag,
         description=args.description,
-        status=status,
-        failure_reason=failure_reason,
         next_hypothesis=args.next_hypothesis,
-        metrics_path=str((paths.nonlinear_dir / output_tag / "metrics.json").relative_to(paths.root)),
-        log_path=log_path,
     )
-    record_experiment(paths, record)
     print(f"Recorded exp-{record.experiment_id:04d}")
     print(f"Status: {record.status}")
     print(f"Primary score: {record.primary_score:.6f}")

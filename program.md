@@ -11,6 +11,22 @@ human interrupts it.
 - Imported reference: `exp-0051` (`primary_score=0.000565`).
 - Keep local wins here until they are reviewed and deliberately promoted back into the sibling worktrees.
 
+## Setup
+
+Before starting a new loop:
+
+1. Read `README.md`, `AGENTS.md`, `program.md`, `research/state.md`, and `research/final_report.md`.
+2. Verify the environment with `python -m mlfd.setup`.
+3. Confirm `CYLINDER_ALL.mat` exists in the repo root.
+4. Confirm the current best imported reference is still `exp-0051`.
+5. If this sandbox has no local experiment history yet, run one clean baseline with:
+
+```powershell
+python -m mlfd.autoresearch run-current --description "baseline import check" --next-hypothesis "Start the first real candidate change."
+```
+
+After setup, enter the experiment loop and do not stop unless interrupted by the human.
+
 ## Mission
 
 Improve nonlinear prediction quality for the cylinder wake project while keeping
@@ -100,18 +116,26 @@ Loop until interrupted by the human:
 
 1. Read the latest research memory and identify the current best result.
 2. Form one concrete hypothesis.
-3. Edit the nonlinear code directly.
-4. Run a single measured experiment.
+3. Edit the nonlinear code directly under `src/` or `tests/`.
+4. Run a single measured experiment with `apply-candidate`.
 5. Check the result against the current best.
-6. Keep the change if it wins, otherwise discard it and move on.
+6. Keep the change if it wins, otherwise let `apply-candidate` restore the previous code and move on.
 7. Record the outcome in the normal research memory.
 8. Continue immediately to the next idea.
 
-The primary command for a single fully logged experiment is:
+The primary command for a single fully logged candidate experiment is:
 
 ```powershell
-python -m mlfd.autoresearch run-current --description "<what changed>" --next-hypothesis "<next idea>"
+python -m mlfd.autoresearch apply-candidate --description "<what changed>" --next-hypothesis "<next idea>"
 ```
+
+`apply-candidate` is the closest equivalent to the original `autoresearch` philosophy in this sandbox:
+
+- it commits only the current candidate code edits
+- runs one experiment
+- records the result
+- keeps the commit if it wins
+- restores the previous code automatically if it loses or crashes
 
 Use `python -m mlfd.autoresearch search-ae ...` or `run-campaign ...` only as helper tools for cheap AE-floor screening. They are not the main research loop. The main loop is still agent-driven code editing plus keep/discard judgment.
 

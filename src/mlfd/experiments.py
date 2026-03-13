@@ -309,7 +309,7 @@ def build_record(
     decided_status = status or decide_status(metrics["primary_score"], metrics["peak_memory_gb"], records, config)
     return ExperimentRecord(
         experiment_id=_next_global_experiment_id(paths),
-        commit=short_git_commit(paths.root),
+        commit=short_git_commit(paths.root, ignored_paths=paths.runtime_git_ignored_paths),
         primary_score=float(metrics["primary_score"]),
         recon_rmse=float(metrics["recon_rmse"]),
         rmse_t100=float(metrics["rmse_t100"]),
