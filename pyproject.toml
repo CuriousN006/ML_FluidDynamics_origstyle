@@ -5,18 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ml-fluid-dynamics"
 version = "0.1.0"
-description = "Agentic fluid dynamics research harness for linear and nonlinear wake modeling."
+description = "Minimal original-style autoresearch clone for fluid dynamics."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "imageio>=2.37.0",
     "matplotlib>=3.10.0",
     "numpy>=2.2.0",
-    "optuna>=4.4.0",
-    "pandas>=2.2.0",
-    "pillow>=11.1.0",
-    "pytest>=8.4.0",
-    "scikit-learn>=1.7.0",
     "scipy>=1.15.0",
     "torch",
     "tqdm>=4.67.0",
@@ -27,7 +22,3 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.pytest.ini_options]
-addopts = "-q"
-testpaths = ["tests"]

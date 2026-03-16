@@ -1,11 +1,3 @@
-"""ML fluid dynamics research package."""
+from .config import NonlinearConfig, ProjectPaths
 
-from .config import AutoresearchConfig, LinearConfig, NonlinearConfig, ProjectPaths
-
-__all__ = [
-    "AutoresearchConfig",
-    "LinearConfig",
-    "NonlinearConfig",
-    "ProjectPaths",
-]
-
+__all__ = ["NonlinearConfig", "ProjectPaths"]

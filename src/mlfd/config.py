@@ -5,8 +5,6 @@ from pathlib import Path
 from typing import Iterable
 
 
-DEFAULT_RUN_TAG = "20260313-local-rtx3070"
-DEFAULT_BRANCH_NAME = f"campaign/{DEFAULT_RUN_TAG}"
 DEFAULT_SNAPSHOT_DT = 0.2
 
 
@@ -24,116 +22,21 @@ def discover_root(start: Path | None = None) -> Path:
 @dataclass(frozen=True)
 class ProjectPaths:
     root: Path = field(default_factory=discover_root)
-    run_tag: str = DEFAULT_RUN_TAG
 
     @property
     def data_file(self) -> Path:
         return self.root / "CYLINDER_ALL.mat"
 
     @property
-    def src_dir(self) -> Path:
-        return self.root / "src" / "mlfd"
-
-    @property
     def output_dir(self) -> Path:
         return self.root / "output"
-
-    @property
-    def linear_dir(self) -> Path:
-        return self.output_dir / "linear"
 
     @property
     def nonlinear_dir(self) -> Path:
         return self.output_dir / "nonlinear"
 
-    @property
-    def research_dir(self) -> Path:
-        return self.root / "research"
-
-    @property
-    def experiment_dir(self) -> Path:
-        return self.research_dir / "experiments"
-
-    @property
-    def run_dir(self) -> Path:
-        return self.research_dir / "runs" / self.run_tag
-
-    @property
-    def run_log_dir(self) -> Path:
-        return self.output_dir / "autoresearch" / self.run_tag
-
-    @property
-    def candidate_recovery_json(self) -> Path:
-        return self.run_log_dir / "candidate_recovery.json"
-
-    @property
-    def results_tsv(self) -> Path:
-        return self.root / "results.tsv"
-
-    @property
-    def default_log_worktree_dir(self) -> Path:
-        return self.root.parent / f"{self.root.name}_log"
-
-    @property
-    def log_sync_paths(self) -> tuple[str, ...]:
-        return (
-            "results.tsv",
-            "research",
-        )
-
-    @property
-    def state_md(self) -> Path:
-        return self.research_dir / "state.md"
-
-    @property
-    def idea_registry_md(self) -> Path:
-        return self.research_dir / "idea_registry.md"
-
-    @property
-    def idea_registry_json(self) -> Path:
-        return self.research_dir / "idea_registry.json"
-
-    @property
-    def final_report_md(self) -> Path:
-        return self.research_dir / "final_report.md"
-
-    @property
-    def program_md(self) -> Path:
-        return self.root / "program.md"
-
-    @property
-    def branch_name(self) -> str:
-        return f"campaign/{self.run_tag}"
-
-    @property
-    def log_branch_name(self) -> str:
-        return f"log/{self.run_tag}"
-
-    @property
-    def runtime_git_ignored_paths(self) -> tuple[str, ...]:
-        return (
-            "results.tsv",
-            "research",
-            "output",
-        )
-
-    @property
-    def candidate_code_prefixes(self) -> tuple[str, ...]:
-        return (
-            "src/",
-            "tests/",
-        )
-
     def ensure_directories(self, extra: Iterable[Path] | None = None) -> None:
-        directories = [
-            self.output_dir,
-            self.linear_dir,
-            self.nonlinear_dir,
-            self.research_dir,
-            self.experiment_dir,
-            self.run_dir,
-            self.run_log_dir,
-        ]
+        directories = [self.output_dir, self.nonlinear_dir]
         if extra:
             directories.extend(extra)
         for directory in directories:
@@ -141,30 +44,19 @@ class ProjectPaths:
 
 
 @dataclass(frozen=True)
-class LinearConfig:
-    field_name: str = "VORTALL"
-    truncated_rank: int = 10
-    leading_modes: int = 5
-    mode_movie_count: int = 3
-    compare_steps: tuple[int, ...] = (50, 100, 150)
-    dmd_ranks: tuple[int, ...] = (5, 10, 15, 20, 30, 50)
-    fps: int = 12
-
-
-@dataclass(frozen=True)
 class NonlinearConfig:
     field_name: str = "VORTALL"
     layout: str = "portrait"
     seed: int = 42
-    latent_dim: int = 24
-    ae_architecture: str = "residual"
+    latent_dim: int = 32
+    ae_architecture: str = "residual_refine"
     ae_width_mult: float = 1.0
     coordconv: bool = False
     coarse_loss_weight: float = 0.25
     coarse_blur_kernel: int = 9
     coarse_blur_sigma: float = 2.0
     refine_blocks: int = 1
-    refine_channels_mult: float = 1.0
+    refine_channels_mult: float = 1.25
     dynamics_model: str = "residual_linear"
     ae_epochs: int = 160
     dyn_epochs: int = 260
@@ -173,7 +65,7 @@ class NonlinearConfig:
     dyn_learning_rate: float = 1e-3
     weight_decay: float = 1e-5
     latent_l1_weight: float = 1e-4
-    dyn_l2_weight: float = 1e-5
+    dyn_l2_weight: float = 0.0
     gradient_loss_weight: float = 0.1
     fft_loss_weight: float = 0.0
     rollout_loss_weight: float = 0.15
@@ -211,14 +103,3 @@ class NonlinearConfig:
             batch_size=8,
             early_stopping_patience=2,
         )
-
-
-@dataclass(frozen=True)
-class AutoresearchConfig:
-    run_tag: str = DEFAULT_RUN_TAG
-    max_trials: int = 24
-    timeout_seconds: int = 12 * 60
-    target_runtime_seconds: int = 10 * 60
-    comparison_tolerance: float = 0.0025
-    vram_reduction_threshold: float = 0.05
-    baseline_description: str = "baseline convolutional AE + latent MLP"

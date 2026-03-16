@@ -13,12 +13,11 @@ To set up a new run, work with the user to:
    branch. This run should happen on its own fresh branch.
 3. **Read the in-scope files**:
    - `README.md`
-   - `src/mlfd/nonlinear.py`
-   - `src/mlfd/models.py` only if needed for an architecture change
-   - `src/mlfd/run_nonlinear.py` for the CLI surface
+   - `prepare.py`
+   - `train.py`
 4. **Verify data exists**: confirm `CYLINDER_ALL.mat` is present in the repo
    root.
-5. **Verify the environment**: run `python -m mlfd.setup`.
+5. **Verify the environment**: run `python prepare.py`.
 6. **Initialize results.tsv**: keep `results.tsv` with only the header row
    before the first run.
 7. **Confirm and go**: the first run should be the current baseline as-is.
@@ -31,14 +30,15 @@ Each experiment runs on a single local GPU.
 
 **What you CAN do:**
 
-- Modify `src/mlfd/nonlinear.py`.
-- Modify `src/mlfd/models.py` if the nonlinear idea genuinely needs an
-  architectural change there.
+- Modify `train.py`.
+- Only inspect or modify files under `src/mlfd/` if you are blocked and the
+  wrapper in `train.py` is not enough.
 - Modify hyperparameters, losses, training schedule, model structure, and
   rollout behavior as long as the evaluation stays comparable.
 
 **What you CANNOT do:**
 
+- Modify `prepare.py`. It is the fixed setup/data check script for this clone.
 - Change the meaning of `primary_score`.
 - Change the fixed train/validation/test split logic to make results
   incomparable.
@@ -74,7 +74,7 @@ The current overall goal is still to beat the fixed best `DMD` baseline.
 Launch one experiment like this:
 
 ```powershell
-python -m mlfd.run_nonlinear --output-tag candidate > run.log 2>&1
+python train.py --output-tag candidate > run.log 2>&1
 ```
 
 The exact output tag is up to you. Keep it simple and unique per run.
@@ -130,13 +130,13 @@ LOOP FOREVER:
 
 1. Look at the current git state and current best result.
 2. Form one concrete hypothesis.
-3. Hack `src/mlfd/nonlinear.py` directly. Touch `src/mlfd/models.py` only if
-   required.
+3. Hack `train.py` directly. Only open `src/mlfd/` if the idea cannot be
+   expressed in `train.py`.
 4. `git commit` the candidate code.
 5. Run the experiment:
 
    ```powershell
-   python -m mlfd.run_nonlinear --output-tag candidate > run.log 2>&1
+   python train.py --output-tag candidate > run.log 2>&1
    ```
 
 6. Inspect `output/nonlinear/<output-tag>/metrics.json`. If it is missing, read
