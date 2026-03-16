@@ -1,202 +1,156 @@
-# Fluid Autoresearch Program
+# autoresearch
 
-This workspace follows the original `karpathy/autoresearch` style: the agent is
-the researcher. It should keep reading the current code, editing the nonlinear
-pipeline, running experiments, judging the result, and continuing until the
-human interrupts it.
-
-## Worktree Scope
-
-- This is an isolated autonomous sandbox cloned from the 2026-03-11 global reference.
-- Imported reference: `exp-0051` (`primary_score=0.000565`).
-- Keep local wins here until they are reviewed and deliberately promoted back into the sibling worktrees.
+This is an experiment to have the LLM do its own research on the cylinder-wake
+nonlinear model.
 
 ## Setup
 
-Before starting a new loop:
+To set up a new run, work with the user to:
 
-1. Read `README.md`, `AGENTS.md`, `program.md`, `research/idea_registry.md`, and `research/state.md`.
-2. Open `research/final_report.md` only after you have a candidate direction or if the short memory is not enough.
-3. Verify the environment with `python -m mlfd.setup`.
-4. Confirm `CYLINDER_ALL.mat` exists in the repo root.
-5. Confirm the current best imported reference is still `exp-0051`.
-6. If this sandbox has no local experiment history yet, run one clean baseline with:
+1. **Agree on a run tag**: use a short tag based on today's date or objective
+   (for example `mar16`, `mar16-decoder`, `mar16-rtx3070`).
+2. **Create the branch**: `git checkout -b autoresearch/<tag>` from the current
+   branch. This run should happen on its own fresh branch.
+3. **Read the in-scope files**:
+   - `README.md`
+   - `src/mlfd/nonlinear.py`
+   - `src/mlfd/models.py` only if needed for an architecture change
+   - `src/mlfd/run_nonlinear.py` for the CLI surface
+4. **Verify data exists**: confirm `CYLINDER_ALL.mat` is present in the repo
+   root.
+5. **Verify the environment**: run `python -m mlfd.setup`.
+6. **Initialize results.tsv**: keep `results.tsv` with only the header row
+   before the first run.
+7. **Confirm and go**: the first run should be the current baseline as-is.
 
-```powershell
-python -m mlfd.autoresearch baseline-check --description "baseline import check" --next-hypothesis "Start the first real candidate change."
-```
+Once setup is done, kick off the experimentation.
 
-After setup, enter the experiment loop and do not stop unless interrupted by the human.
+## Experimentation
 
-## Mission
+Each experiment runs on a single local GPU.
 
-Improve nonlinear prediction quality for the cylinder wake project while keeping
-the fixed data contract and evaluation logic intact. The primary objective is to
-minimize the `primary_score` written by `python -m mlfd.run_nonlinear`.
+**What you CAN do:**
 
-## Fixed Rules
+- Modify `src/mlfd/nonlinear.py`.
+- Modify `src/mlfd/models.py` if the nonlinear idea genuinely needs an
+  architectural change there.
+- Modify hyperparameters, losses, training schedule, model structure, and
+  rollout behavior as long as the evaluation stays comparable.
 
-1. Use `CYLINDER_ALL.mat` as the primary data source.
-2. Do not change the meaning of `primary_score` or the ledger columns in `results.tsv`.
-3. Preserve the append-only research memory:
-   - `results.tsv`
-   - `research/experiments/*.md`
-   - `research/state.md`
-   - `research/runs/20260313-local-rtx3070/index.md`
-4. Keep the linear pipeline stable unless a bug blocks baseline artifact generation.
-5. Keep the portrait layout and portrait comparison figures as the nonlinear default.
+**What you CANNOT do:**
 
-## Current Working Baseline
+- Change the meaning of `primary_score`.
+- Change the fixed train/validation/test split logic to make results
+  incomparable.
+- Quietly rewrite past experiment history.
+- Touch unrelated tooling just because it is available.
 
-Treat `exp-0051` as the reference model for this worktree and the current overall campaign:
+**The goal is simple: get the lowest `primary_score`.**
 
-- `layout=portrait`
+VRAM is a soft constraint. Some increase is acceptable for a meaningful gain,
+but do not explode memory for tiny wins.
+
+**Simplicity criterion**: all else equal, simpler is better. A small win that
+adds ugly complexity is not automatically worth keeping. A similarly good result
+from deleting complexity is a strong win.
+
+**The first run**: always establish the baseline first by running the current
+code without changes.
+
+## Current baseline
+
+This clone starts from the imported `exp-0051` nonlinear reference:
+
 - `ae_architecture=residual_refine`
-- `ae_width_mult=1.0`
-- `coordconv=False`
-- `dynamics_model=residual_linear`
 - `latent_dim=32`
-- `coarse_loss_weight=0.25`
-- `coarse_blur_kernel=9`
-- `coarse_blur_sigma=2.0`
-- `refine_blocks=1`
 - `refine_channels_mult=1.25`
-- `gradient_loss_weight=0.10`
-- `fft_loss_weight=0.0`
-- `latent_l1_weight=1e-4`
-- `dyn_l2_weight=0`
 - `rollout_loss_weight=0.15`
-- `train_rollout_horizon=16`
-- `train_rollout_stride=8`
-- `validation_rollout_horizon=24`
-- `validation_rollout_stride=4`
-- `deterministic=True`
-
-Reference metrics:
-
 - `primary_score=0.000565`
-- `recon_rmse=0.020886`
-- `rmse_t100=0.020372`
-- `rmse_t150=0.018893`
-- `ae_floor_rmse_t150=0.018927`
 
-## In-Scope Files
+The current overall goal is still to beat the fixed best `DMD` baseline.
 
-Read these before major changes:
+## Run command
 
-- `README.md`
-- `AGENTS.md`
-- `program.md`
-- `research/state.md`
-- `research/final_report.md`
-- `src/mlfd/config.py`
-- `src/mlfd/run_nonlinear.py`
-- `src/mlfd/models.py`
-- `src/mlfd/nonlinear.py`
-- `src/mlfd/autoresearch.py`
+Launch one experiment like this:
 
-## Allowed Changes
+```powershell
+python -m mlfd.run_nonlinear --output-tag candidate > run.log 2>&1
+```
 
-- Nonlinear model architecture
-- Decoder or representation design
-- Latent dynamics implementation
-- Training schedule and hyperparameters
-- AE-only screening flow
-- Autoresearch helper code in this sandbox if it helps the loop run more cleanly
+The exact output tag is up to you. Keep it simple and unique per run.
 
-## Forbidden Changes
+When the run finishes, read:
 
-- Changing the semantics of `primary_score`
-- Changing the fixed dataset split logic to make results incomparable
-- Quietly rewriting or deleting past experiment history
-- Treating imported results as if they were discovered locally
+- `output/nonlinear/<output-tag>/metrics.json`
+- `run.log`
 
-## Core Loop
+Key fields to look at:
 
-Loop until interrupted by the human:
+- `primary_score`
+- `peak_memory_gb`
+- `wall_seconds`
+- `recon_rmse`
+- `rmse_t100`
+- `rmse_t150`
 
-1. Read the latest research memory and identify the current best result.
+If `metrics.json` is missing, the run crashed.
+
+## Logging results
+
+When an experiment is done, log it to `results.tsv` as tab-separated values.
+Do not commit `results.tsv`.
+
+The TSV has a header row and 5 columns:
+
+```text
+commit	primary_score	memory_gb	status	description
+```
+
+1. short git commit hash
+2. `primary_score` achieved
+3. peak GPU memory in GB
+4. status: `keep`, `discard`, or `crash`
+5. short description of what the experiment tried
+
+Example:
+
+```text
+commit	primary_score	memory_gb	status	description
+abc1234	0.000565	6.1	keep	baseline imported reference
+def5678	0.000552	6.4	keep	add decoder-side conditioning
+9876fed	0.000580	6.2	discard	increase latent dim to 48
+6543cba	0.000000	0.0	crash	double decoder width
+```
+
+## The experiment loop
+
+The experiment runs on a dedicated branch such as `autoresearch/mar16`.
+
+LOOP FOREVER:
+
+1. Look at the current git state and current best result.
 2. Form one concrete hypothesis.
-3. Edit the nonlinear code directly under `src/` or `tests/`.
-4. Run a single measured experiment with `apply-candidate --idea-key ...`.
-5. Check the result against the current best.
-6. Keep the change if it wins, otherwise let `apply-candidate` restore the previous code and move on.
-7. Record the outcome in the normal research memory.
-8. Continue immediately to the next idea.
+3. Hack `src/mlfd/nonlinear.py` directly. Touch `src/mlfd/models.py` only if
+   required.
+4. `git commit` the candidate code.
+5. Run the experiment:
 
-The primary command for a single fully logged candidate experiment is:
+   ```powershell
+   python -m mlfd.run_nonlinear --output-tag candidate > run.log 2>&1
+   ```
 
-```powershell
-python -m mlfd.autoresearch apply-candidate --idea-key "<idea family key>" --description "<what changed>" --next-hypothesis "<next idea>"
-```
+6. Inspect `output/nonlinear/<output-tag>/metrics.json`. If it is missing, read
+   the end of `run.log` for the failure.
+7. Record the result in `results.tsv`.
+8. If `primary_score` improved, keep the commit and advance.
+9. If `primary_score` is equal or worse, `git reset` back to where you started.
 
-Idea keys should use `lower_snake_case`. Use a material version suffix such as `_v1`, `_v2`, `_v3` when the formulation itself changes.
+If a run crashes because of a small bug, fix it and try again. If the idea
+itself is broken, log it as `crash`, revert, and move on.
 
-`apply-candidate` is the closest equivalent to the original `autoresearch` philosophy in this sandbox:
+**Timeout**: a single experiment should normally stay around the existing local
+runtime envelope. If it goes clearly off the rails, kill it and treat it as a
+failure.
 
-- it commits only the current candidate code edits
-- checks the idea registry before the run
-- runs one experiment
-- records the result
-- keeps the commit if it wins
-- restores the previous code automatically if it loses or crashes
-
-Use `python -m mlfd.autoresearch search-ae ...` or `run-campaign ...` only as helper tools for cheap AE-floor screening. They are not the main research loop. The main loop is still agent-driven code editing plus keep/discard judgment.
-Use `baseline-check` or `run-current` only for clean baseline validation or debugging.
-Use `snapshot-logs` periodically to checkpoint append-only experiment memory into the dedicated log branch/worktree without polluting the campaign code history.
-
-## Interruption Recovery
-
-If `apply-candidate` is interrupted by a power loss, forced stop, terminal kill, or machine crash, recover before starting another candidate:
-
-```powershell
-python -m mlfd.autoresearch recover-candidate
-```
-
-This restores the last pending candidate commit back to its base commit when the interrupted candidate is still checked out. If you already resolved the branch state manually, clear the stale recovery marker with:
-
-```powershell
-python -m mlfd.autoresearch recover-candidate --clear-only
-```
-
-## Keep/Discard Policy
-
-- Better `primary_score`: keep.
-- Worse `primary_score`: discard.
-- Within 0.25%: keep only if the code is simpler or GPU memory is at least 5% lower.
-- Crash or timeout: log it and move on.
-
-## Runtime Budget
-
-- Hard timeout per experiment: 12 minutes.
-- Target runtime per experiment: 10 minutes.
-- Prefer cheap AE-only screening before full rollout promotion.
-
-## Safety Valves
-
-This sandbox intentionally supports bounded helper loops even though the main mode is open-ended agentic research.
-
-- `run-campaign --max-rounds N` stops after `N` rounds.
-- `run-campaign --max-hours H` stops after `H` wall-clock hours.
-- `run-campaign` also stops when its stop file appears.
-
-These are guardrails for unattended helper runs, not replacements for the main autoresearch workflow.
-
-## Logging Requirements
-
-Every experiment must update:
-
-1. `results.tsv`
-2. `research/experiments/exp-XXXX.md`
-3. `research/state.md`
-4. `research/runs/20260313-local-rtx3070/index.md`
-
-Failures are first-class results and must stay recorded.
-
-Use `snapshot-logs` on this cadence unless there is a reason not to:
-
-1. immediately after every kept result
-2. after about five experiments even if none were winners
-3. before shutting down the machine or ending a session
-
-`research/state.md` and `research/runs/.../index.md` are generated runtime memory, not hand-maintained narrative documents.
+**NEVER STOP**: once the loop begins, do not ask the human whether to continue.
+Keep iterating until manually interrupted.

@@ -8,6 +8,7 @@ __pycache__/
 .DS_Store
 output/
 run.log
+results.tsv
 results.tsv.bak
 *.tmp
 
