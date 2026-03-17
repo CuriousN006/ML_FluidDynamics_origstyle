@@ -32,6 +32,8 @@ DYN_EPOCHS = 260
 BATCH_SIZE = 16
 AE_LEARNING_RATE = 1e-3
 DYN_LEARNING_RATE = 1e-3
+AE_SCHEDULER = "plateau"
+DYN_SCHEDULER = "plateau"
 WEIGHT_DECAY = 1e-5
 LATENT_L1_WEIGHT = 1e-4
 DYN_L2_WEIGHT = 0.0
@@ -68,6 +70,8 @@ def build_config(*, smoke: bool, device_override: str | None) -> NonlinearConfig
         batch_size=BATCH_SIZE,
         ae_learning_rate=AE_LEARNING_RATE,
         dyn_learning_rate=DYN_LEARNING_RATE,
+        ae_scheduler=AE_SCHEDULER,
+        dyn_scheduler=DYN_SCHEDULER,
         weight_decay=WEIGHT_DECAY,
         latent_l1_weight=LATENT_L1_WEIGHT,
         dyn_l2_weight=DYN_L2_WEIGHT,
