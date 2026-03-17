@@ -584,7 +584,14 @@ def _train_autoencoder(
         preview_artifacts["full"].append(full_name)
         preview_artifacts["wake"].append(wake_name)
 
-    latents, reconstructed_frames, coarse_frames = _encode_all_frames(model, bundle, stats, config.batch_size, device)
+    latents, reconstructed_frames, coarse_frames = _encode_all_frames(
+        model,
+        bundle,
+        stats,
+        config.batch_size,
+        device,
+        config.use_amp,
+    )
     peak_memory_gb = float(torch.cuda.max_memory_allocated(device) / (1024**3)) if device.type == "cuda" else 0.0
     metrics = {
         "snapshot_indices": split.snapshot_indices(),
