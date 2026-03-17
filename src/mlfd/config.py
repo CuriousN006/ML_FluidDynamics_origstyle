@@ -111,6 +111,7 @@ class NonlinearConfig:
     error_percentile: float = 99.0
     num_preview_images: int = 4
     device: str = "auto"
+    use_amp: bool = False
     deterministic: bool = True
     save_checkpoint: bool = False
 

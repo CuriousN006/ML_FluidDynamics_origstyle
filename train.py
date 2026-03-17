@@ -49,6 +49,7 @@ VALIDATION_ROLLOUT_HORIZON = 24
 AE_MIN_LEARNING_RATE = 5e-6
 EARLY_STOPPING_PATIENCE = 80
 DEVICE = "auto"
+USE_AMP = True
 DETERMINISTIC = True
 SAVE_CHECKPOINT = False
 
@@ -89,6 +90,7 @@ def build_config(*, smoke: bool, device_override: str | None) -> NonlinearConfig
         ae_min_learning_rate=AE_MIN_LEARNING_RATE,
         early_stopping_patience=EARLY_STOPPING_PATIENCE,
         device=device_override or DEVICE,
+        use_amp=USE_AMP,
         deterministic=DETERMINISTIC,
         save_checkpoint=SAVE_CHECKPOINT,
     )

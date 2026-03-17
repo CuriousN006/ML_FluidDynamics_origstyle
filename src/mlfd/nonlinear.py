@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import time
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -32,6 +33,27 @@ def detect_device(requested: str = "auto") -> torch.device:
     if requested != "auto":
         return torch.device(requested)
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def _amp_enabled(use_amp: bool, device: torch.device) -> bool:
+    return bool(use_amp and device.type == "cuda")
+
+
+def _autocast_context(use_amp: bool, device: torch.device):
+    if _amp_enabled(use_amp, device):
+        return torch.autocast(device_type=device.type, dtype=torch.float16)
+    return nullcontext()
+
+
+def _make_grad_scaler(use_amp: bool, device: torch.device):
+    if not _amp_enabled(use_amp, device):
+        return None
+    if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
+        try:
+            return torch.amp.GradScaler(device.type)
+        except TypeError:
+            return torch.amp.GradScaler()
+    return torch.cuda.amp.GradScaler()
 
 
 class SnapshotDataset(Dataset[torch.Tensor]):
@@ -290,13 +312,20 @@ def _evaluate_autoencoder(
     with torch.no_grad():
         for batch in loader:
             batch = batch.to(device)
-            latent = model.encode(batch)  # type: ignore[attr-defined]
-            recon, auxiliary_outputs = _decode_autoencoder(model, latent)
-            loss = _autoencoder_reconstruction_loss(recon, batch, latent=None, config=config, auxiliary_outputs=auxiliary_outputs)
+            with _autocast_context(config.use_amp, device):
+                latent = model.encode(batch)  # type: ignore[attr-defined]
+                recon, auxiliary_outputs = _decode_autoencoder(model, latent)
+                loss = _autoencoder_reconstruction_loss(
+                    recon,
+                    batch,
+                    latent=None,
+                    config=config,
+                    auxiliary_outputs=auxiliary_outputs,
+                )
             losses.append(loss.item())
-            truth = _denormalize(batch, stats).cpu().numpy()
-            pred = _denormalize(recon, stats).cpu().numpy()
-            coarse = _denormalize(auxiliary_outputs["coarse"], stats).cpu().numpy()
+            truth = _denormalize(batch.float(), stats).cpu().numpy()
+            pred = _denormalize(recon.float(), stats).cpu().numpy()
+            coarse = _denormalize(auxiliary_outputs["coarse"].float(), stats).cpu().numpy()
             for true_item, pred_item in zip(truth, pred, strict=True):
                 truth_pred_pairs.append((true_item[0], pred_item[0]))
             for true_item, coarse_item in zip(truth, coarse, strict=True):
@@ -315,6 +344,7 @@ def _encode_all_frames(
     stats: NormalizationStats,
     batch_size: int,
     device: torch.device,
+    use_amp: bool,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     indices = np.arange(bundle.num_snapshots)
     dataset = SnapshotDataset(bundle.frames, indices, stats.mean, stats.std)
@@ -326,11 +356,12 @@ def _encode_all_frames(
     with torch.no_grad():
         for batch in loader:
             batch = batch.to(device)
-            latent = model.encode(batch)  # type: ignore[attr-defined]
-            recon, auxiliary_outputs = _decode_autoencoder(model, latent)
-            latents.append(latent.cpu().numpy())
-            reconstructions.append(_denormalize(recon, stats).cpu().numpy()[:, 0])
-            coarse_reconstructions.append(_denormalize(auxiliary_outputs["coarse"], stats).cpu().numpy()[:, 0])
+            with _autocast_context(use_amp, device):
+                latent = model.encode(batch)  # type: ignore[attr-defined]
+                recon, auxiliary_outputs = _decode_autoencoder(model, latent)
+            latents.append(latent.float().cpu().numpy())
+            reconstructions.append(_denormalize(recon.float(), stats).cpu().numpy()[:, 0])
+            coarse_reconstructions.append(_denormalize(auxiliary_outputs["coarse"].float(), stats).cpu().numpy()[:, 0])
     return (
         np.concatenate(latents, axis=0),
         np.concatenate(reconstructions, axis=0).astype(np.float32),
