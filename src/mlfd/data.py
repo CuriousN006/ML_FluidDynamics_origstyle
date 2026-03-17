@@ -15,7 +15,7 @@ FIELD_LABELS = {
     "VORTALL": "vorticity",
 }
 
-STRICT_TEMPORAL_HOLDOUT_PROTOCOL = "strict_temporal_holdout_v1"
+STRICT_TEMPORAL_HOLDOUT_PROTOCOL = "assignment_temporal_holdout_v1"
 EXPECTED_NUM_SNAPSHOTS = 151
 
 
@@ -145,18 +145,20 @@ class TemporalHoldoutSplit:
         }
 
 
-def build_strict_temporal_holdout(num_snapshots: int) -> TemporalHoldoutSplit:
+def build_assignment_temporal_holdout(num_snapshots: int) -> TemporalHoldoutSplit:
     if num_snapshots != EXPECTED_NUM_SNAPSHOTS:
         raise ValueError(
             f"{STRICT_TEMPORAL_HOLDOUT_PROTOCOL} expects {EXPECTED_NUM_SNAPSHOTS} snapshots, found {num_snapshots}."
         )
 
-    snapshot_train_idx = np.arange(0, 80, dtype=np.int64)
-    snapshot_val_idx = np.arange(80, 100, dtype=np.int64)
-    snapshot_test_idx = np.arange(100, 151, dtype=np.int64)
-    transition_train_idx = np.arange(0, 79, dtype=np.int64)
-    transition_val_idx = np.arange(79, 99, dtype=np.int64)
-    transition_test_idx = np.arange(99, 150, dtype=np.int64)
+    # Assignment-aligned protocol: keep an explicit ~10% reconstruction test split,
+    # reserve a small temporal validation window, and leave t=150 inside held-out future.
+    snapshot_train_idx = np.arange(0, 120, dtype=np.int64)
+    snapshot_val_idx = np.arange(120, 135, dtype=np.int64)
+    snapshot_test_idx = np.arange(135, 151, dtype=np.int64)
+    transition_train_idx = np.arange(0, 119, dtype=np.int64)
+    transition_val_idx = np.arange(119, 134, dtype=np.int64)
+    transition_test_idx = np.arange(134, 150, dtype=np.int64)
 
     return TemporalHoldoutSplit(
         protocol=STRICT_TEMPORAL_HOLDOUT_PROTOCOL,

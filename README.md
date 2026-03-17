@@ -32,15 +32,20 @@ src/mlfd/       - small runtime helper library behind train.py
 The main metric is **`primary_score`** — lower is better.
 
 As of 2026-03-17, this worktree evaluates new runs under the fixed
-`strict_temporal_holdout_v1` protocol:
+`assignment_temporal_holdout_v1` protocol:
 
-- snapshots `[0,80)` train, `[80,100)` val, `[100,151)` test
-- transitions `[0,79)` train, `[79,99)` val, `[99,150)` test
+- snapshots `[0,120)` train, `[120,135)` val, `[135,151)` test
+- transitions `[0,119)` train, `[119,134)` val, `[134,150)` test
+
+This keeps an explicit held-out reconstruction test split of `16/151` snapshots
+(about `10.6%`) while preserving a temporal validation window for model
+selection. Under this protocol, `t=100` is a seen-region forecast and `t=150`
+is a held-out future forecast.
 
 Older branch-local nonlinear scores from before this reset used a mixed split
 and are historical only. The imported sibling-worktree `DMD` numbers
 (`rank=15`, `rmse_t100=0.017423`, `rmse_t150=0.018166`) are also legacy and
-not comparable until they are rerun under the same strict protocol.
+not comparable until they are rerun under the same protocol.
 
 ## Quick start
 

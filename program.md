@@ -35,13 +35,13 @@ Each experiment runs on a single local GPU.
   wrapper in `train.py` is not enough.
 - Modify hyperparameters, losses, training schedule, model structure, and
   rollout behavior as long as the evaluation stays comparable under the fixed
-  `strict_temporal_holdout_v1` protocol.
+  `assignment_temporal_holdout_v1` protocol.
 
 **What you CANNOT do:**
 
 - Modify `prepare.py`. It is the fixed setup/data check script for this clone.
 - Change the meaning of `primary_score`.
-- Change the fixed `strict_temporal_holdout_v1` split logic to make results
+- Change the fixed `assignment_temporal_holdout_v1` split logic to make results
   incomparable.
 - Quietly rewrite past experiment history.
 - Touch unrelated tooling just because it is available.
@@ -60,11 +60,16 @@ code without changes.
 
 ## Current baseline
 
-All new runs in this worktree now use the fixed `strict_temporal_holdout_v1`
+All new runs in this worktree now use the fixed `assignment_temporal_holdout_v1`
 evaluation contract:
 
-- snapshots `[0,80)` train, `[80,100)` val, `[100,151)` test
-- transitions `[0,79)` train, `[79,99)` val, `[99,150)` test
+- snapshots `[0,120)` train, `[120,135)` val, `[135,151)` test
+- transitions `[0,119)` train, `[119,134)` val, `[134,150)` test
+
+Interpret the required forecast targets honestly under this protocol:
+
+- `t=100` is a seen-region forecast inside the training segment
+- `t=150` is a held-out future forecast inside the test segment
 
 Historical context only:
 
@@ -84,9 +89,9 @@ The fixed best `DMD` baseline was imported from the sibling
 - `rmse_t150=0.018166`
 
 These legacy nonlinear and `DMD` numbers were not produced under
-`strict_temporal_holdout_v1` and are not comparable to new runs.
+`assignment_temporal_holdout_v1` and are not comparable to new runs.
 
-The current goal is to lower strict `primary_score` and regenerate any linear
+The current goal is to lower protocol-aligned `primary_score` and regenerate any linear
 comparison baseline under the same protocol before making "beats DMD" claims.
 
 ## Run command

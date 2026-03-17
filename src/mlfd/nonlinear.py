@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from .config import NonlinearConfig, ProjectPaths
-from .data import FieldBundle, TemporalHoldoutSplit, build_strict_temporal_holdout, load_field_bundle
+from .data import FieldBundle, TemporalHoldoutSplit, build_assignment_temporal_holdout, load_field_bundle
 from .metrics import mse, nrmse, primary_score, rmse
 from .models import build_autoencoder, build_dynamics_model
 from .plots import (
@@ -355,6 +355,23 @@ def _rollout_operator(operator: np.ndarray, initial_state: np.ndarray, num_steps
 
 def _compare_steps(steps: tuple[int, ...], num_snapshots: int) -> tuple[int, ...]:
     return tuple(step for step in steps if 0 <= step < num_snapshots)
+
+
+def _compare_step_regions(compare_steps: tuple[int, ...], split: TemporalHoldoutSplit) -> dict[str, str]:
+    regions: dict[str, str] = {}
+    train_set = set(split.snapshot_train_idx.tolist())
+    val_set = set(split.snapshot_val_idx.tolist())
+    test_set = set(split.snapshot_test_idx.tolist())
+    for step in compare_steps:
+        if step in train_set:
+            regions[f"step_{step}"] = "train_seen_region"
+        elif step in val_set:
+            regions[f"step_{step}"] = "validation_holdout_region"
+        elif step in test_set:
+            regions[f"step_{step}"] = "test_holdout_region"
+        else:
+            regions[f"step_{step}"] = "outside_protocol"
+    return regions
 
 
 def _compute_step_metrics(
@@ -738,8 +755,9 @@ def run_nonlinear_pipeline(
 
     device = detect_device(config.device)
     bundle = load_field_bundle(config.field_name, paths, layout=config.layout)
-    split = build_strict_temporal_holdout(bundle.num_snapshots)
+    split = build_assignment_temporal_holdout(bundle.num_snapshots)
     compare_steps = _compare_steps(config.compare_steps, bundle.num_snapshots)
+    compare_step_regions = _compare_step_regions(compare_steps, split)
     _save_truth_reference(bundle, compare_steps, output_dir, config)
 
     autoencoder, stats, ae_metrics, latents, reconstructed_frames, coarse_frames = _train_autoencoder(
@@ -767,6 +785,7 @@ def run_nonlinear_pipeline(
             "config": asdict(config),
             "snapshot_split": split.snapshot_indices(),
             "transition_split": split.transition_indices(),
+            "compare_step_regions": compare_step_regions,
             "device": str(device),
             "screening_mode": "ae_only",
             "ae": {**ae_metrics, "floor_metrics": ae_floor_metrics},
@@ -821,6 +840,7 @@ def run_nonlinear_pipeline(
         "config": asdict(config),
         "snapshot_split": split.snapshot_indices(),
         "transition_split": split.transition_indices(),
+        "compare_step_regions": compare_step_regions,
         "device": str(device),
         "ae": {**ae_metrics, "floor_metrics": ae_floor_metrics},
         "dynamics": dyn_metrics,
