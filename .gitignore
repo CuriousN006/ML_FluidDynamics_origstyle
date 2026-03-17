@@ -9,7 +9,7 @@ __pycache__/
 output/
 run.log
 results.tsv
-results_legacy.tsv
+archive/results_legacy.tsv
 results.tsv.bak
 *.tmp
 

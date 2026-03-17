@@ -42,10 +42,20 @@ This keeps an explicit held-out reconstruction test split of `16/151` snapshots
 selection. Under this protocol, `t=100` is a seen-region forecast and `t=150`
 is a held-out future forecast.
 
-Older branch-local nonlinear scores from before this reset used a mixed split
-and are historical only. The imported sibling-worktree `DMD` numbers
-(`rank=15`, `rmse_t100=0.017423`, `rmse_t150=0.018166`) are also legacy and
-not comparable until they are rerun under the same protocol.
+Current active baseline:
+
+- commit `ebe44cc`
+- output `output/nonlinear/mar17-assignment-baseline-01/`
+- `primary_score=0.000367318220`
+
+Current comparison status:
+
+- `results.tsv` is the active scoreboard
+- there is no active `DMD` baseline yet under `assignment_temporal_holdout_v1`
+- this stripped-down clone does not currently include a local `DMD` runner
+- any `DMD` comparison claim must wait for a rerun under the current protocol
+
+Archived pre-reset notes and ledgers live under `archive/`.
 
 ## Quick start
 

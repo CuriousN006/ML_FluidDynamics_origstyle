@@ -71,28 +71,26 @@ Interpret the required forecast targets honestly under this protocol:
 - `t=100` is a seen-region forecast inside the training segment
 - `t=150` is a held-out future forecast inside the test segment
 
-Historical context only:
+Active branch baseline:
 
-- imported `exp-0051` nonlinear reference
-- `ae_architecture=residual_refine`
-- `latent_dim=32`
-- `refine_channels_mult=1.25`
-- legacy `primary_score=0.000565`
+- commit `ebe44cc`
+- output `output/nonlinear/mar17-assignment-baseline-01/metrics.json`
+- `primary_score=0.000367318220`
+- `recon_nrmse=0.000362827779`
+- `nrmse_t100=0.000365243841`
+- `nrmse_t150=0.000370359024`
 
-The imported sibling-worktree `DMD` baseline is also historical context only:
+Active ledger and archive rules:
 
-The fixed best `DMD` baseline was imported from the sibling
-`D:\Projects\ML_FluidDynamics_Project\ML_FluidDynamics` worktree:
+- `results.tsv` is the only active scoreboard
+- archived pre-reset notes live under `archive/`
+- do not compare against archived nonlinear or imported `DMD` numbers in active decisions
 
-- `DMD` rank `15`
-- `rmse_t100=0.017423`
-- `rmse_t150=0.018166`
-
-These legacy nonlinear and `DMD` numbers were not produced under
-`assignment_temporal_holdout_v1` and are not comparable to new runs.
-
-The current goal is to lower protocol-aligned `primary_score` and regenerate any linear
-comparison baseline under the same protocol before making "beats DMD" claims.
+The current goal is to lower protocol-aligned `primary_score` and regenerate a
+matching `DMD` baseline under the same protocol before making any "beats DMD"
+claim. This stripped-down clone does not currently ship a local `DMD` runner,
+so that baseline must be regenerated in a sibling linear-capable worktree or
+after porting the linear pipeline into this repo.
 
 ## Run command
 
