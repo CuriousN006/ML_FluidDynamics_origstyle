@@ -31,8 +31,16 @@ src/mlfd/       - small runtime helper library behind train.py
 
 The main metric is **`primary_score`** — lower is better.
 
-The fixed linear comparison target is the imported sibling-worktree `DMD`
-baseline: rank `15` with `rmse_t100=0.017423` and `rmse_t150=0.018166`.
+As of 2026-03-17, this worktree evaluates new runs under the fixed
+`strict_temporal_holdout_v1` protocol:
+
+- snapshots `[0,80)` train, `[80,100)` val, `[100,151)` test
+- transitions `[0,79)` train, `[79,99)` val, `[99,150)` test
+
+Older branch-local nonlinear scores from before this reset used a mixed split
+and are historical only. The imported sibling-worktree `DMD` numbers
+(`rank=15`, `rmse_t100=0.017423`, `rmse_t150=0.018166`) are also legacy and
+not comparable until they are rerun under the same strict protocol.
 
 ## Quick start
 

@@ -84,8 +84,6 @@ class NonlinearConfig:
     train_rollout_horizon: int = 16
     validation_rollout_stride: int = 4
     validation_rollout_horizon: int = 24
-    ae_train_ratio: float = 0.9
-    dyn_train_ratio: float = 0.8
     early_stopping_patience: int = 20
     compare_steps: tuple[int, ...] = (100, 150)
     zoom_crop: tuple[int, int, int, int] = (0, 240, 20, 180)

@@ -34,13 +34,14 @@ Each experiment runs on a single local GPU.
 - Only inspect or modify files under `src/mlfd/` if you are blocked and the
   wrapper in `train.py` is not enough.
 - Modify hyperparameters, losses, training schedule, model structure, and
-  rollout behavior as long as the evaluation stays comparable.
+  rollout behavior as long as the evaluation stays comparable under the fixed
+  `strict_temporal_holdout_v1` protocol.
 
 **What you CANNOT do:**
 
 - Modify `prepare.py`. It is the fixed setup/data check script for this clone.
 - Change the meaning of `primary_score`.
-- Change the fixed train/validation/test split logic to make results
+- Change the fixed `strict_temporal_holdout_v1` split logic to make results
   incomparable.
 - Quietly rewrite past experiment history.
 - Touch unrelated tooling just because it is available.
@@ -59,22 +60,34 @@ code without changes.
 
 ## Current baseline
 
-This clone starts from the imported `exp-0051` nonlinear reference:
+All new runs in this worktree now use the fixed `strict_temporal_holdout_v1`
+evaluation contract:
 
+- snapshots `[0,80)` train, `[80,100)` val, `[100,151)` test
+- transitions `[0,79)` train, `[79,99)` val, `[99,150)` test
+
+Historical context only:
+
+- imported `exp-0051` nonlinear reference
 - `ae_architecture=residual_refine`
 - `latent_dim=32`
 - `refine_channels_mult=1.25`
-- `rollout_loss_weight=0.15`
-- `primary_score=0.000565`
+- legacy `primary_score=0.000565`
 
-The fixed best `DMD` baseline is imported from the sibling
+The imported sibling-worktree `DMD` baseline is also historical context only:
+
+The fixed best `DMD` baseline was imported from the sibling
 `D:\Projects\ML_FluidDynamics_Project\ML_FluidDynamics` worktree:
 
 - `DMD` rank `15`
 - `rmse_t100=0.017423`
 - `rmse_t150=0.018166`
 
-The current overall goal is still to beat that fixed best `DMD` baseline.
+These legacy nonlinear and `DMD` numbers were not produced under
+`strict_temporal_holdout_v1` and are not comparable to new runs.
+
+The current goal is to lower strict `primary_score` and regenerate any linear
+comparison baseline under the same protocol before making "beats DMD" claims.
 
 ## Run command
 

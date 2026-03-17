@@ -15,6 +15,9 @@ FIELD_LABELS = {
     "VORTALL": "vorticity",
 }
 
+STRICT_TEMPORAL_HOLDOUT_PROTOCOL = "strict_temporal_holdout_v1"
+EXPECTED_NUM_SNAPSHOTS = 151
+
 
 @dataclass(frozen=True)
 class FieldBundle:
@@ -105,19 +108,62 @@ def load_field_bundle(
     )
 
 
-def random_snapshot_split(num_items: int, train_ratio: float, seed: int) -> tuple[np.ndarray, np.ndarray]:
-    rng = np.random.default_rng(seed)
-    indices = np.arange(num_items)
-    rng.shuffle(indices)
-    split = max(1, min(num_items - 1, int(num_items * train_ratio)))
-    train_idx = np.sort(indices[:split])
-    test_idx = np.sort(indices[split:])
-    return train_idx, test_idx
+@dataclass(frozen=True)
+class TemporalHoldoutSplit:
+    protocol: str
+    snapshot_train_idx: np.ndarray
+    snapshot_val_idx: np.ndarray
+    snapshot_test_idx: np.ndarray
+    transition_train_idx: np.ndarray
+    transition_val_idx: np.ndarray
+    transition_test_idx: np.ndarray
+
+    @property
+    def snapshot_train_stop(self) -> int:
+        return int(self.snapshot_train_idx[-1]) + 1
+
+    @property
+    def snapshot_val_stop(self) -> int:
+        return int(self.snapshot_val_idx[-1]) + 1
+
+    @property
+    def snapshot_test_stop(self) -> int:
+        return int(self.snapshot_test_idx[-1]) + 1
+
+    def snapshot_indices(self) -> dict[str, list[int]]:
+        return {
+            "train": self.snapshot_train_idx.tolist(),
+            "val": self.snapshot_val_idx.tolist(),
+            "test": self.snapshot_test_idx.tolist(),
+        }
+
+    def transition_indices(self) -> dict[str, list[int]]:
+        return {
+            "train": self.transition_train_idx.tolist(),
+            "val": self.transition_val_idx.tolist(),
+            "test": self.transition_test_idx.tolist(),
+        }
 
 
-def sequential_transition_split(num_snapshots: int, train_ratio: float) -> tuple[np.ndarray, np.ndarray]:
-    if num_snapshots < 3:
-        raise ValueError("Need at least 3 snapshots for transition modeling.")
-    transition_indices = np.arange(num_snapshots - 1)
-    split = max(1, min(len(transition_indices) - 1, int(len(transition_indices) * train_ratio)))
-    return transition_indices[:split], transition_indices[split:]
+def build_strict_temporal_holdout(num_snapshots: int) -> TemporalHoldoutSplit:
+    if num_snapshots != EXPECTED_NUM_SNAPSHOTS:
+        raise ValueError(
+            f"{STRICT_TEMPORAL_HOLDOUT_PROTOCOL} expects {EXPECTED_NUM_SNAPSHOTS} snapshots, found {num_snapshots}."
+        )
+
+    snapshot_train_idx = np.arange(0, 80, dtype=np.int64)
+    snapshot_val_idx = np.arange(80, 100, dtype=np.int64)
+    snapshot_test_idx = np.arange(100, 151, dtype=np.int64)
+    transition_train_idx = np.arange(0, 79, dtype=np.int64)
+    transition_val_idx = np.arange(79, 99, dtype=np.int64)
+    transition_test_idx = np.arange(99, 150, dtype=np.int64)
+
+    return TemporalHoldoutSplit(
+        protocol=STRICT_TEMPORAL_HOLDOUT_PROTOCOL,
+        snapshot_train_idx=snapshot_train_idx,
+        snapshot_val_idx=snapshot_val_idx,
+        snapshot_test_idx=snapshot_test_idx,
+        transition_train_idx=transition_train_idx,
+        transition_val_idx=transition_val_idx,
+        transition_test_idx=transition_test_idx,
+    )

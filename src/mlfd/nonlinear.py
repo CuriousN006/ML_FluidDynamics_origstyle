@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from .config import NonlinearConfig, ProjectPaths
-from .data import FieldBundle, load_field_bundle, random_snapshot_split, sequential_transition_split
+from .data import FieldBundle, TemporalHoldoutSplit, build_strict_temporal_holdout, load_field_bundle
 from .metrics import mse, nrmse, primary_score, rmse
 from .models import build_autoencoder, build_dynamics_model
 from .plots import (
@@ -199,8 +199,10 @@ def _summarize_snapshot_pairs(truth_pred_pairs: list[tuple[np.ndarray, np.ndarra
     )
 
 
-def _rollout_start_indices(indices: np.ndarray, stride: int, num_snapshots: int) -> list[int]:
-    starts = [int(index) for index in indices[:: max(1, stride)] if int(index) < num_snapshots - 1]
+def _rollout_start_indices(indices: np.ndarray, stride: int) -> list[int]:
+    if len(indices) == 0:
+        return []
+    starts = [int(index) for index in indices[:: max(1, stride)]]
     if starts:
         return starts
     return [int(indices[0])]
@@ -211,8 +213,12 @@ def _latent_rollout_loss(
     latent_tensor: torch.Tensor,
     start_index: int,
     horizon: int,
+    *,
+    max_target_exclusive: int | None = None,
 ) -> torch.Tensor:
     max_horizon = int(latent_tensor.shape[0] - start_index - 1)
+    if max_target_exclusive is not None:
+        max_horizon = min(max_horizon, max(0, max_target_exclusive - start_index - 1))
     effective_horizon = min(horizon, max_horizon)
     if effective_horizon <= 0:
         return latent_tensor.new_tensor(0.0)
@@ -231,8 +237,19 @@ def _multi_start_rollout_loss(
     latent_tensor: torch.Tensor,
     start_indices: list[int],
     horizon: int,
+    *,
+    max_target_exclusive: int | None = None,
 ) -> torch.Tensor:
-    losses = [_latent_rollout_loss(model, latent_tensor, start_index, horizon) for start_index in start_indices]
+    losses = [
+        _latent_rollout_loss(
+            model,
+            latent_tensor,
+            start_index,
+            horizon,
+            max_target_exclusive=max_target_exclusive,
+        )
+        for start_index in start_indices
+    ]
     if not losses:
         return latent_tensor.new_tensor(0.0)
     return torch.stack(losses).mean()
@@ -243,14 +260,17 @@ def _dynamics_validation_terms(
     latent_tensor: torch.Tensor,
     val_idx: np.ndarray,
     config: NonlinearConfig,
+    *,
+    max_target_exclusive: int,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     val_one_step = F.mse_loss(model(latent_tensor[val_idx]), latent_tensor[val_idx + 1])
-    val_starts = _rollout_start_indices(val_idx, config.validation_rollout_stride, int(latent_tensor.shape[0]))
+    val_starts = _rollout_start_indices(val_idx, config.validation_rollout_stride)
     val_rollout = _multi_start_rollout_loss(
         model,
         latent_tensor,
         start_indices=val_starts,
         horizon=min(config.validation_rollout_horizon, len(val_idx)),
+        max_target_exclusive=max_target_exclusive,
     )
     selection_loss = val_one_step + (config.validation_rollout_weight * val_rollout)
     return val_one_step, val_rollout, selection_loss
@@ -407,17 +427,22 @@ def _save_step_artifacts(
 
 def _train_autoencoder(
     bundle: FieldBundle,
+    split: TemporalHoldoutSplit,
     config: NonlinearConfig,
     output_dir: Path,
     device: torch.device,
 ) -> tuple[nn.Module, NormalizationStats, dict[str, object], np.ndarray, np.ndarray, np.ndarray]:
-    train_idx, test_idx = random_snapshot_split(bundle.num_snapshots, config.ae_train_ratio, config.seed)
+    train_idx = split.snapshot_train_idx
+    val_idx = split.snapshot_val_idx
+    test_idx = split.snapshot_test_idx
     train_frames = bundle.frames[train_idx]
     stats = NormalizationStats(mean=float(train_frames.mean()), std=float(train_frames.std() + 1e-6))
     train_dataset = SnapshotDataset(bundle.frames, train_idx, stats.mean, stats.std)
+    val_dataset = SnapshotDataset(bundle.frames, val_idx, stats.mean, stats.std)
     test_dataset = SnapshotDataset(bundle.frames, test_idx, stats.mean, stats.std)
     train_loader = _build_loader(train_dataset, config.batch_size, True, config.seed)
-    test_loader = _build_loader(test_dataset, config.batch_size, False, config.seed + 1)
+    val_loader = _build_loader(val_dataset, config.batch_size, False, config.seed + 1)
+    test_loader = _build_loader(test_dataset, config.batch_size, False, config.seed + 2)
 
     model = build_autoencoder(
         (bundle.height, bundle.width),
@@ -463,7 +488,7 @@ def _train_autoencoder(
             loss.backward()
             optimizer.step()
             batch_losses.append(loss.item())
-        val_loss, _, _, _ = _evaluate_autoencoder(model, test_loader, device, stats, config)
+        val_loss, _, _, _ = _evaluate_autoencoder(model, val_loader, device, stats, config)
         train_loss = float(np.mean(batch_losses))
         history["train_loss"].append(train_loss)
         history["val_loss"].append(val_loss)
@@ -514,8 +539,7 @@ def _train_autoencoder(
     latents, reconstructed_frames, coarse_frames = _encode_all_frames(model, bundle, stats, config.batch_size, device)
     peak_memory_gb = float(torch.cuda.max_memory_allocated(device) / (1024**3)) if device.type == "cuda" else 0.0
     metrics = {
-        "train_indices": train_idx.tolist(),
-        "test_indices": test_idx.tolist(),
+        "snapshot_indices": split.snapshot_indices(),
         "recon_mse": reconstruction_summary.mse,
         "recon_rmse": reconstruction_summary.rmse,
         "recon_nrmse": reconstruction_summary.nrmse,
@@ -539,14 +563,16 @@ def _train_dynamics(
     bundle: FieldBundle,
     autoencoder: nn.Module,
     stats: NormalizationStats,
+    split: TemporalHoldoutSplit,
     config: NonlinearConfig,
     output_dir: Path,
     device: torch.device,
 ) -> dict[str, object]:
-    train_idx, val_idx = sequential_transition_split(bundle.num_snapshots, config.dyn_train_ratio)
+    train_idx = split.transition_train_idx
+    val_idx = split.transition_val_idx
     latent_stats = LatentNormalizationStats(
-        mean=latents[train_idx].mean(axis=0).astype(np.float32),
-        std=(latents[train_idx].std(axis=0) + 1e-6).astype(np.float32),
+        mean=latents[split.snapshot_train_idx].mean(axis=0).astype(np.float32),
+        std=(latents[split.snapshot_train_idx].std(axis=0) + 1e-6).astype(np.float32),
     )
     latents_norm = _standardize_latents(latents, latent_stats)
     linear_operator = _fit_linear_operator(latents_norm, train_idx)
@@ -574,7 +600,7 @@ def _train_dynamics(
     best_state = copy.deepcopy(model.state_dict())
     best_loss = float("inf")
     patience = 0
-    train_starts = _rollout_start_indices(train_idx, config.train_rollout_stride, bundle.num_snapshots)
+    train_starts = _rollout_start_indices(train_idx, config.train_rollout_stride)
 
     start = time.perf_counter()
     for _ in tqdm(range(config.dyn_epochs), desc="Dyn", leave=False):
@@ -587,6 +613,7 @@ def _train_dynamics(
             latent_tensor,
             start_indices=train_starts,
             horizon=min(config.train_rollout_horizon, len(train_idx)),
+            max_target_exclusive=split.snapshot_train_stop,
         )
         loss = one_step_loss + (config.rollout_loss_weight * rollout_loss) + (config.dyn_l2_weight * _regularization_l2(model))
         optimizer.zero_grad(set_to_none=True)
@@ -595,7 +622,13 @@ def _train_dynamics(
 
         model.eval()
         with torch.no_grad():
-            val_one_step, val_rollout, val_loss = _dynamics_validation_terms(model, latent_tensor, val_idx, config)
+            val_one_step, val_rollout, val_loss = _dynamics_validation_terms(
+                model,
+                latent_tensor,
+                val_idx,
+                config,
+                max_target_exclusive=split.snapshot_val_stop,
+            )
         history["train_loss"].append(loss.item())
         history["val_loss"].append(val_loss.item())
         history["val_one_step_loss"].append(val_one_step.item())
@@ -671,8 +704,7 @@ def _train_dynamics(
 
     peak_memory_gb = float(torch.cuda.max_memory_allocated(device) / (1024**3)) if device.type == "cuda" else 0.0
     return {
-        "train_transition_indices": train_idx.tolist(),
-        "val_transition_indices": val_idx.tolist(),
+        "transition_indices": split.transition_indices(),
         "history": history,
         "dyn_seconds": dyn_seconds,
         "rollout_metrics": compare_metrics,
@@ -706,10 +738,17 @@ def run_nonlinear_pipeline(
 
     device = detect_device(config.device)
     bundle = load_field_bundle(config.field_name, paths, layout=config.layout)
+    split = build_strict_temporal_holdout(bundle.num_snapshots)
     compare_steps = _compare_steps(config.compare_steps, bundle.num_snapshots)
     _save_truth_reference(bundle, compare_steps, output_dir, config)
 
-    autoencoder, stats, ae_metrics, latents, reconstructed_frames, coarse_frames = _train_autoencoder(bundle, config, output_dir, device)
+    autoencoder, stats, ae_metrics, latents, reconstructed_frames, coarse_frames = _train_autoencoder(
+        bundle,
+        split,
+        config,
+        output_dir,
+        device,
+    )
     ae_floor_metrics = _compute_step_metrics(bundle.frames, reconstructed_frames, compare_steps)
     coarse_floor_metrics = _compute_step_metrics(bundle.frames, coarse_frames, compare_steps)
     ae_floor_artifacts = _save_step_artifacts("ae_floor", bundle.frames, reconstructed_frames, compare_steps, output_dir, config)
@@ -721,10 +760,13 @@ def run_nonlinear_pipeline(
     if ae_only:
         metrics = {
             "created_at": utc_timestamp(),
+            "evaluation_protocol": split.protocol,
             "field_name": bundle.field_name,
             "layout": config.layout,
             "summary": bundle.summary(),
             "config": asdict(config),
+            "snapshot_split": split.snapshot_indices(),
+            "transition_split": split.transition_indices(),
             "device": str(device),
             "screening_mode": "ae_only",
             "ae": {**ae_metrics, "floor_metrics": ae_floor_metrics},
@@ -761,7 +803,7 @@ def run_nonlinear_pipeline(
         _maybe_save_autoencoder_checkpoint(autoencoder, output_dir, save_checkpoint=config.save_checkpoint)
         return metrics
 
-    dyn_metrics = _train_dynamics(latents, bundle, autoencoder, stats, config, output_dir, device)
+    dyn_metrics = _train_dynamics(latents, bundle, autoencoder, stats, split, config, output_dir, device)
     rollout_metrics = dyn_metrics["rollout_metrics"]
     linear_metrics = dyn_metrics["linear_baseline_metrics"]
     step_100 = rollout_metrics.get("step_100", {"mse": 0.0, "nrmse": 0.0, "rmse": 0.0})
@@ -772,10 +814,13 @@ def run_nonlinear_pipeline(
 
     metrics = {
         "created_at": utc_timestamp(),
+        "evaluation_protocol": split.protocol,
         "field_name": bundle.field_name,
         "layout": config.layout,
         "summary": bundle.summary(),
         "config": asdict(config),
+        "snapshot_split": split.snapshot_indices(),
+        "transition_split": split.transition_indices(),
         "device": str(device),
         "ae": {**ae_metrics, "floor_metrics": ae_floor_metrics},
         "dynamics": dyn_metrics,
