@@ -559,7 +559,10 @@ def _train_dynamics(
         config.dynamics_depth,
         linear_init=linear_init,
     ).to(device)
-    optimizer = AdamW(model.parameters(), lr=config.dyn_learning_rate, weight_decay=config.weight_decay)
+    if hasattr(model, "linear") and hasattr(model, "residual"):
+        optimizer = AdamW(model.residual.parameters(), lr=config.dyn_learning_rate, weight_decay=config.weight_decay)  # type: ignore[attr-defined]
+    else:
+        optimizer = AdamW(model.parameters(), lr=config.dyn_learning_rate, weight_decay=config.weight_decay)
     scheduler = _build_scheduler(
         config.dyn_scheduler,
         optimizer,
