@@ -86,11 +86,19 @@ Active ledger and archive rules:
 - archived pre-reset notes live under `archive/`
 - do not compare against archived nonlinear or imported `DMD` numbers in active decisions
 
-The current goal is to lower protocol-aligned `primary_score` and regenerate a
-matching `DMD` baseline under the same protocol before making any "beats DMD"
-claim. This stripped-down clone does not currently ship a local `DMD` runner,
-so that baseline must be regenerated in a sibling linear-capable worktree or
-after porting the linear pipeline into this repo.
+Active local `DMD` reference under the same protocol:
+
+- output `output/linear/mar17-assignment-dmd-baseline-01/metrics.json`
+- best rank `15`
+- `primary_score=0.000466643474`
+- `recon_nrmse=0.000163697573`
+- `nrmse_t100=0.000496426162`
+- `nrmse_t150=0.000569952222`
+
+This repo now ships a local `DMD` runner via `run_linear.py`, but `results.tsv`
+still tracks only nonlinear experiments. Use the regenerated local `DMD`
+baseline above as the active fixed reference when deciding whether a nonlinear
+run is truly competitive.
 
 ## Run command
 

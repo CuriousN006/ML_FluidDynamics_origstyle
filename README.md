@@ -15,6 +15,7 @@ This workspace is intentionally treated as if only a few files really matter:
 - **`prepare.py`** — fixed setup/data check script. Do not modify.
 - **`train.py`** — the main file the agent edits. It defines the experiment
   defaults and launches one nonlinear run.
+- **`run_linear.py`** — local `DMD` baseline runner under the same protocol.
 - **`program.md`** — baseline instructions for one agent. Point the agent here
   and let it run.
 - **`results.tsv`** — untracked experiment ledger. Do not commit it.
@@ -24,6 +25,7 @@ This workspace is intentionally treated as if only a few files really matter:
 ```text
 prepare.py      - fixed setup/data check script (do not modify)
 train.py        - main experiment file (agent modifies this)
+run_linear.py   - local DMD baseline runner
 program.md      - agent instructions
 pyproject.toml  - dependencies
 src/mlfd/       - small runtime helper library behind train.py
@@ -51,9 +53,10 @@ Current active baseline:
 Current comparison status:
 
 - `results.tsv` is the active scoreboard
-- there is no active `DMD` baseline yet under `assignment_temporal_holdout_v1`
-- this stripped-down clone does not currently include a local `DMD` runner
-- any `DMD` comparison claim must wait for a rerun under the current protocol
+- local `DMD` baseline output: `output/linear/mar17-assignment-dmd-baseline-01/`
+- local `DMD` baseline: rank `15`, `primary_score=0.000466643474`
+- local `DMD` baseline: `recon_nrmse=0.000163697573`, `nrmse_t100=0.000496426162`, `nrmse_t150=0.000569952222`
+- current nonlinear baseline `ebe44cc` is lower at `0.000367318220`
 
 Archived pre-reset notes and ledgers live under `archive/`.
 
@@ -66,6 +69,7 @@ py -3.12 -m venv .venv
 .venv\Scripts\python -m pip install -e .
 .venv\Scripts\python prepare.py
 .venv\Scripts\python train.py --smoke
+.venv\Scripts\python run_linear.py --output-tag dmd-baseline
 ```
 
 If you already have the shared project environment, you can also reuse:

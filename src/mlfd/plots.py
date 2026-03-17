@@ -97,6 +97,46 @@ def save_training_curves(history: dict[str, list[float]], path: Path, title: str
     _save_figure(fig, path)
 
 
+def save_singular_spectrum(singular_values: np.ndarray, path: Path, title: str = "Singular value spectrum") -> None:
+    fig, ax = plt.subplots(figsize=(6.5, 4.0))
+    ranks = np.arange(1, len(singular_values) + 1)
+    ax.semilogy(ranks, singular_values, marker="o", markersize=3, linewidth=1.2)
+    ax.set_xlabel("Index")
+    ax.set_ylabel("Singular value")
+    ax.set_title(title)
+    ax.grid(alpha=0.25)
+    _save_figure(fig, path)
+
+
+def save_complex_plane(eigenvalues: np.ndarray, path: Path, title: str) -> None:
+    fig, ax = plt.subplots(figsize=(5.6, 5.6))
+    theta = np.linspace(0.0, 2.0 * np.pi, 400)
+    ax.plot(np.cos(theta), np.sin(theta), linestyle="--", linewidth=1.0, color="gray", alpha=0.8)
+    ax.scatter(np.real(eigenvalues), np.imag(eigenvalues), s=20, alpha=0.85)
+    ax.axhline(0.0, color="black", linewidth=0.8, alpha=0.5)
+    ax.axvline(0.0, color="black", linewidth=0.8, alpha=0.5)
+    ax.set_xlabel("Real")
+    ax.set_ylabel("Imaginary")
+    ax.set_title(title)
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(alpha=0.25)
+    _save_figure(fig, path)
+
+
+def save_rank_sweep(scores: dict[int, float], path: Path, ylabel: str, title: str) -> None:
+    if not scores:
+        return
+    ranks = np.array(sorted(scores.keys()), dtype=np.int64)
+    values = np.array([scores[int(rank)] for rank in ranks], dtype=np.float64)
+    fig, ax = plt.subplots(figsize=(6.5, 4.0))
+    ax.plot(ranks, values, marker="o", linewidth=1.4)
+    ax.set_xlabel("Rank")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.grid(alpha=0.25)
+    _save_figure(fig, path)
+
+
 def save_latent_trajectory_pca(
     true_latents: np.ndarray,
     predicted_latents: np.ndarray,

@@ -32,15 +32,36 @@ class ProjectPaths:
         return self.root / "output"
 
     @property
+    def linear_dir(self) -> Path:
+        return self.output_dir / "linear"
+
+    @property
     def nonlinear_dir(self) -> Path:
         return self.output_dir / "nonlinear"
 
     def ensure_directories(self, extra: Iterable[Path] | None = None) -> None:
-        directories = [self.output_dir, self.nonlinear_dir]
+        directories = [self.output_dir, self.linear_dir, self.nonlinear_dir]
         if extra:
             directories.extend(extra)
         for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
+
+
+@dataclass(frozen=True)
+class LinearConfig:
+    field_name: str = "VORTALL"
+    layout: str = "portrait"
+    truncated_rank: int = 15
+    dmd_ranks: tuple[int, ...] = (5, 10, 15, 20, 30, 50)
+    compare_steps: tuple[int, ...] = (100, 150)
+    zoom_crop: tuple[int, int, int, int] = (0, 240, 20, 180)
+    error_percentile: float = 99.0
+
+    def smoke(self) -> "LinearConfig":
+        return replace(
+            self,
+            dmd_ranks=(5, 10, 15),
+        )
 
 
 @dataclass(frozen=True)
