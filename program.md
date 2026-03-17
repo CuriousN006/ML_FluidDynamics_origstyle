@@ -67,7 +67,14 @@ This clone starts from the imported `exp-0051` nonlinear reference:
 - `rollout_loss_weight=0.15`
 - `primary_score=0.000565`
 
-The current overall goal is still to beat the fixed best `DMD` baseline.
+The fixed best `DMD` baseline is imported from the sibling
+`D:\Projects\ML_FluidDynamics_Project\ML_FluidDynamics` worktree:
+
+- `DMD` rank `15`
+- `rmse_t100=0.017423`
+- `rmse_t150=0.018166`
+
+The current overall goal is still to beat that fixed best `DMD` baseline.
 
 ## Run command
 

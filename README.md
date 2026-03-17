@@ -31,6 +31,9 @@ src/mlfd/       - small runtime helper library behind train.py
 
 The main metric is **`primary_score`** — lower is better.
 
+The fixed linear comparison target is the imported sibling-worktree `DMD`
+baseline: rank `15` with `rmse_t100=0.017423` and `rmse_t150=0.018166`.
+
 ## Quick start
 
 ```powershell
