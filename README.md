@@ -19,6 +19,8 @@ This workspace is intentionally treated as if only a few files really matter:
 - **`program.md`** — baseline instructions for one agent. Point the agent here
   and let it run.
 - **`results.tsv`** — untracked experiment ledger. Do not commit it.
+- **`proxy_results.tsv`** — untracked short-budget screening ledger. Do not
+  commit it.
 
 ## Project structure
 
@@ -46,17 +48,18 @@ is a held-out future forecast.
 
 Current active baseline:
 
-- commit `ebe44cc`
-- output `output/nonlinear/mar17-assignment-baseline-01/`
-- `primary_score=0.000367318220`
+- commit `d8c36d7`
+- output `output/nonlinear/mar18-control-ae3600-dyn1800-01/`
+- `primary_score=0.000255791203`
 
 Current comparison status:
 
-- `results.tsv` is the active scoreboard
+- `results.tsv` is the active full-run scoreboard
+- `proxy_results.tsv` is the active short-budget screening ledger
 - local `DMD` baseline output: `output/linear/mar17-assignment-dmd-baseline-01/`
 - local `DMD` baseline: rank `15`, `primary_score=0.000466643474`
 - local `DMD` baseline: `recon_nrmse=0.000163697573`, `nrmse_t100=0.000496426162`, `nrmse_t150=0.000569952222`
-- current nonlinear baseline `ebe44cc` is lower at `0.000367318220`
+- current nonlinear champion `d8c36d7` is lower at `0.000255791203`
 
 Archived pre-reset notes and ledgers live under `archive/`.
 
@@ -94,8 +97,8 @@ The `program.md` file is the main control surface.
 - **Single main file to modify.** Default to `train.py`.
 - **Keep/discard by git.** A run that wins advances the branch. A run that
   loses is reset away.
-- **Manual, minimal logging.** `results.tsv` is the only required experiment
-  ledger in the main loop.
+- **Two-stage logging.** `proxy_results.tsv` tracks short proxy screening and
+  `results.tsv` tracks long confirmation runs.
 - **Local Windows/RTX target.** This clone is meant to feel closer to
   `autoresearch-win-rtx` than to the richer fluid sandbox.
 

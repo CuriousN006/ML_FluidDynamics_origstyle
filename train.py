@@ -52,12 +52,20 @@ DEVICE = "auto"
 USE_AMP = True
 DETERMINISTIC = True
 SAVE_CHECKPOINT = False
+PROXY_AE_TRAIN_BUDGET_SECONDS = 600.0
+PROXY_DYN_TRAIN_BUDGET_SECONDS = 180.0
 
 
-def build_config(*, smoke: bool, device_override: str | None) -> NonlinearConfig:
+def build_config(*, smoke: bool, device_override: str | None, profile: str) -> NonlinearConfig:
+    ae_train_budget_seconds = None
+    dyn_train_budget_seconds = None
+    if profile == "proxy":
+        ae_train_budget_seconds = PROXY_AE_TRAIN_BUDGET_SECONDS
+        dyn_train_budget_seconds = PROXY_DYN_TRAIN_BUDGET_SECONDS
     config = NonlinearConfig(
         field_name=FIELD_NAME,
         layout=LAYOUT,
+        profile=profile,
         latent_dim=LATENT_DIM,
         ae_architecture=AE_ARCHITECTURE,
         ae_width_mult=AE_WIDTH_MULT,
@@ -93,6 +101,8 @@ def build_config(*, smoke: bool, device_override: str | None) -> NonlinearConfig
         use_amp=USE_AMP,
         deterministic=DETERMINISTIC,
         save_checkpoint=SAVE_CHECKPOINT,
+        ae_train_budget_seconds=ae_train_budget_seconds,
+        dyn_train_budget_seconds=dyn_train_budget_seconds,
     )
     return config.smoke() if smoke else config
 
@@ -115,9 +125,10 @@ def main() -> None:
     parser.add_argument("--smoke", action="store_true", help="Run a very short smoke configuration.")
     parser.add_argument("--ae-only", action="store_true", help="Train only the autoencoder and report AE-floor metrics.")
     parser.add_argument("--device", default=None, help="Explicit torch device override.")
+    parser.add_argument("--profile", choices=("proxy", "full"), default="full", help="Training budget profile.")
     args = parser.parse_args()
 
-    config = build_config(smoke=args.smoke, device_override=args.device)
+    config = build_config(smoke=args.smoke, device_override=args.device, profile=args.profile)
     metrics = run_nonlinear_pipeline(config, ProjectPaths(root=ROOT), output_tag=args.output_tag, ae_only=args.ae_only)
     print_summary(metrics)
 

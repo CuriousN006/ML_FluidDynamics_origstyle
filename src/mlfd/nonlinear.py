@@ -209,8 +209,12 @@ def _build_scheduler(
             factor=factor,
             patience=patience,
             min_lr=min_lr,
-        )
+    )
     raise ValueError(f"Unsupported scheduler type: {name}")
+
+
+def _budget_exhausted(start_time: float, budget_seconds: float | None) -> bool:
+    return budget_seconds is not None and (time.perf_counter() - start_time) >= budget_seconds
 
 
 def _summarize_snapshot_pairs(truth_pred_pairs: list[tuple[np.ndarray, np.ndarray]]) -> SnapshotMetricSummary:
@@ -513,6 +517,8 @@ def _train_autoencoder(
     best_state = copy.deepcopy(model.state_dict())
     best_loss = float("inf")
     patience = 0
+    batches_ran = 0
+    stop_reason = "epoch_limit"
 
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
@@ -521,6 +527,7 @@ def _train_autoencoder(
     for _ in tqdm(range(config.ae_epochs), desc="AE", leave=False):
         model.train()
         batch_losses = []
+        time_budget_hit = False
         for batch in train_loader:
             batch = batch.to(device)
             latent = model.encode(batch)  # type: ignore[attr-defined]
@@ -536,6 +543,13 @@ def _train_autoencoder(
             loss.backward()
             optimizer.step()
             batch_losses.append(loss.item())
+            batches_ran += 1
+            if _budget_exhausted(start, config.ae_train_budget_seconds):
+                time_budget_hit = True
+                break
+        if not batch_losses:
+            stop_reason = "time_budget" if time_budget_hit else "epoch_limit"
+            break
         val_loss, _, _, _ = _evaluate_autoencoder(model, val_loader, device, stats, config)
         train_loss = float(np.mean(batch_losses))
         history["train_loss"].append(train_loss)
@@ -549,8 +563,12 @@ def _train_autoencoder(
             patience = 0
         else:
             patience += 1
-            if patience >= config.early_stopping_patience:
-                break
+        if time_budget_hit:
+            stop_reason = "time_budget"
+            break
+        if patience >= config.early_stopping_patience:
+            stop_reason = "early_stopping"
+            break
     ae_seconds = time.perf_counter() - start
     model.load_state_dict(best_state)
 
@@ -603,6 +621,13 @@ def _train_autoencoder(
         "coarse_recon_nrmse": coarse_summary.nrmse,
         "history": history,
         "ae_seconds": ae_seconds,
+        "ae_train_budget_seconds": config.ae_train_budget_seconds,
+        "epochs_ran": len(history["val_loss"]),
+        "batches_ran": batches_ran,
+        "stop_reason": stop_reason,
+        "stopped_for_time_budget": stop_reason == "time_budget",
+        "stopped_for_early_stopping": stop_reason == "early_stopping",
+        "stopped_for_epoch_limit": stop_reason == "epoch_limit",
         "peak_memory_gb_after_ae": peak_memory_gb,
         "artifact_paths": {
             "reconstruction_previews_full": preview_artifacts["full"],
@@ -656,6 +681,8 @@ def _train_dynamics(
     best_loss = float("inf")
     patience = 0
     train_starts = _rollout_start_indices(train_idx, config.train_rollout_stride)
+    stop_reason = "epoch_limit"
+    batches_ran = 0
 
     start = time.perf_counter()
     for _ in tqdm(range(config.dyn_epochs), desc="Dyn", leave=False):
@@ -674,6 +701,8 @@ def _train_dynamics(
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
+        batches_ran += 1
+        time_budget_hit = _budget_exhausted(start, config.dyn_train_budget_seconds)
 
         model.eval()
         with torch.no_grad():
@@ -697,8 +726,12 @@ def _train_dynamics(
             patience = 0
         else:
             patience += 1
-            if patience >= config.early_stopping_patience:
-                break
+        if time_budget_hit:
+            stop_reason = "time_budget"
+            break
+        if patience >= config.early_stopping_patience:
+            stop_reason = "early_stopping"
+            break
     dyn_seconds = time.perf_counter() - start
     model.load_state_dict(best_state)
     save_training_curves(
@@ -762,6 +795,13 @@ def _train_dynamics(
         "transition_indices": split.transition_indices(),
         "history": history,
         "dyn_seconds": dyn_seconds,
+        "dyn_train_budget_seconds": config.dyn_train_budget_seconds,
+        "epochs_ran": len(history["val_loss"]),
+        "batches_ran": batches_ran,
+        "stop_reason": stop_reason,
+        "stopped_for_time_budget": stop_reason == "time_budget",
+        "stopped_for_early_stopping": stop_reason == "early_stopping",
+        "stopped_for_epoch_limit": stop_reason == "epoch_limit",
         "rollout_metrics": compare_metrics,
         "linear_baseline_metrics": linear_metrics,
         "peak_memory_gb_after_dyn": peak_memory_gb,
@@ -817,6 +857,7 @@ def run_nonlinear_pipeline(
         metrics = {
             "created_at": utc_timestamp(),
             "evaluation_protocol": split.protocol,
+            "profile": config.profile,
             "field_name": bundle.field_name,
             "layout": config.layout,
             "summary": bundle.summary(),
@@ -826,6 +867,8 @@ def run_nonlinear_pipeline(
             "compare_step_regions": compare_step_regions,
             "device": str(device),
             "screening_mode": "ae_only",
+            "ae_train_budget_seconds": config.ae_train_budget_seconds,
+            "dyn_train_budget_seconds": config.dyn_train_budget_seconds,
             "ae": {**ae_metrics, "floor_metrics": ae_floor_metrics},
             "ae_score": ae_score,
             "primary_score": ae_score,
@@ -872,6 +915,7 @@ def run_nonlinear_pipeline(
     metrics = {
         "created_at": utc_timestamp(),
         "evaluation_protocol": split.protocol,
+        "profile": config.profile,
         "field_name": bundle.field_name,
         "layout": config.layout,
         "summary": bundle.summary(),
@@ -880,6 +924,8 @@ def run_nonlinear_pipeline(
         "transition_split": split.transition_indices(),
         "compare_step_regions": compare_step_regions,
         "device": str(device),
+        "ae_train_budget_seconds": config.ae_train_budget_seconds,
+        "dyn_train_budget_seconds": config.dyn_train_budget_seconds,
         "ae": {**ae_metrics, "floor_metrics": ae_floor_metrics},
         "dynamics": dyn_metrics,
         "ae_score": ae_score,

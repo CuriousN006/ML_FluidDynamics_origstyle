@@ -68,6 +68,7 @@ class LinearConfig:
 class NonlinearConfig:
     field_name: str = "VORTALL"
     layout: str = "portrait"
+    profile: str = "full"
     seed: int = 42
     latent_dim: int = 32
     ae_architecture: str = "residual_refine"
@@ -114,6 +115,8 @@ class NonlinearConfig:
     use_amp: bool = False
     deterministic: bool = True
     save_checkpoint: bool = False
+    ae_train_budget_seconds: float | None = None
+    dyn_train_budget_seconds: float | None = None
 
     def smoke(self) -> "NonlinearConfig":
         return replace(
@@ -122,4 +125,6 @@ class NonlinearConfig:
             dyn_epochs=2,
             batch_size=8,
             early_stopping_patience=2,
+            ae_train_budget_seconds=min(self.ae_train_budget_seconds, 0.05) if self.ae_train_budget_seconds is not None else None,
+            dyn_train_budget_seconds=min(self.dyn_train_budget_seconds, 0.05) if self.dyn_train_budget_seconds is not None else None,
         )

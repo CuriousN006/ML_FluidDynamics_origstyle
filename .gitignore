@@ -9,6 +9,7 @@ __pycache__/
 output/
 run.log
 results.tsv
+proxy_results.tsv
 archive/results_legacy.tsv
 results.tsv.bak
 *.tmp

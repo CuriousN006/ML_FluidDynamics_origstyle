@@ -73,16 +73,17 @@ Interpret the required forecast targets honestly under this protocol:
 
 Active branch baseline:
 
-- commit `ebe44cc`
-- output `output/nonlinear/mar17-assignment-baseline-01/metrics.json`
-- `primary_score=0.000367318220`
-- `recon_nrmse=0.000362827779`
-- `nrmse_t100=0.000365243841`
-- `nrmse_t150=0.000370359024`
+- commit `d8c36d7`
+- output `output/nonlinear/mar18-control-ae3600-dyn1800-01/metrics.json`
+- `primary_score=0.000255791203`
+- `recon_nrmse=0.000256861808`
+- `nrmse_t100=0.000252927063`
+- `nrmse_t150=0.000257081445`
 
 Active ledger and archive rules:
 
-- `results.tsv` is the only active scoreboard
+- `results.tsv` is the active full-run scoreboard
+- `proxy_results.tsv` is the active screening ledger for short proxy runs
 - archived pre-reset notes live under `archive/`
 - do not compare against archived nonlinear or imported `DMD` numbers in active decisions
 
@@ -105,10 +106,12 @@ run is truly competitive.
 Launch one experiment like this:
 
 ```powershell
-python train.py --output-tag candidate > run.log 2>&1
+python train.py --profile proxy --output-tag candidate > run.log 2>&1
 ```
 
-The exact output tag is up to you. Keep it simple and unique per run.
+Use `--profile proxy` for the short screening budget and `--profile full` for
+the long confirmation run. The exact output tag is up to you. Keep it simple
+and unique per run.
 
 When the run finishes, read:
 
@@ -128,8 +131,9 @@ If `metrics.json` is missing, the run crashed.
 
 ## Logging results
 
-When an experiment is done, log it to `results.tsv` as tab-separated values.
-Do not commit `results.tsv`.
+When a proxy experiment is done, log it to `proxy_results.tsv` as tab-separated
+values. When a full experiment is done, log it to `results.tsv`. Do not commit
+either ledger.
 
 The TSV has a header row and 5 columns:
 
@@ -164,24 +168,39 @@ LOOP FOREVER:
 3. Hack `train.py` directly. Only open `src/mlfd/` if the idea cannot be
    expressed in `train.py`.
 4. `git commit` the candidate code.
-5. Run the experiment:
+5. Run proxy screening first:
 
    ```powershell
-   python train.py --output-tag candidate > run.log 2>&1
+   python train.py --profile proxy --output-tag candidate > run.log 2>&1
    ```
 
 6. Inspect `output/nonlinear/<output-tag>/metrics.json`. If it is missing, read
    the end of `run.log` for the failure.
-7. Record the result in `results.tsv`.
-8. If `primary_score` improved, keep the commit and advance.
-9. If `primary_score` is equal or worse, `git reset` back to where you started.
+7. Record the proxy result in `proxy_results.tsv`.
+8. Promote to a full run only if proxy `primary_score` improves by at least
+   `5%` over the current proxy baseline and `nrmse_t150` does not regress.
+9. If promoted, run:
+
+   ```powershell
+   python train.py --profile full --output-tag candidate-full > run.log 2>&1
+   ```
+
+10. Record full-run outcomes only in `results.tsv`.
+11. If the full `primary_score` improved, keep the commit and advance.
+12. If the full `primary_score` is equal or worse, `git reset` back to where
+    you started.
+
+Proxy audit rule:
+
+- if 10 proxy runs pass without a `5%` winner, send the current best proxy
+  candidate to one full audit run to check for proxy drift.
 
 If a run crashes because of a small bug, fix it and try again. If the idea
 itself is broken, log it as `crash`, revert, and move on.
 
-**Timeout**: a single experiment should normally stay around the existing local
-runtime envelope. If it goes clearly off the rails, kill it and treat it as a
-failure.
+**Proxy budget**: `--profile proxy` uses fixed training-time budgets of `10`
+minutes for AE and `3` minutes for dynamics, stopping on batch boundaries.
+`--profile full` keeps the long-run epoch-driven setup.
 
 **NEVER STOP**: once the loop begins, do not ask the human whether to continue.
 Keep iterating until manually interrupted.
