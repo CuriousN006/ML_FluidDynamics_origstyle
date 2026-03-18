@@ -178,7 +178,7 @@ LOOP FOREVER:
    the end of `run.log` for the failure.
 7. Record the proxy result in `proxy_results.tsv`.
 8. Promote to a full run only if proxy `primary_score` improves by at least
-   `5%` over the current proxy baseline and `nrmse_t150` does not regress.
+   `10%` over the current proxy baseline and `nrmse_t150` does not regress.
 9. If promoted, run:
 
    ```powershell
@@ -192,7 +192,7 @@ LOOP FOREVER:
 
 Proxy audit rule:
 
-- if 10 proxy runs pass without a `5%` winner, send the current best proxy
+- if 10 proxy runs pass without a `10%` winner, send the current best proxy
   candidate to one full audit run to check for proxy drift.
 
 If a run crashes because of a small bug, fix it and try again. If the idea

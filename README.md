@@ -99,6 +99,9 @@ The `program.md` file is the main control surface.
   loses is reset away.
 - **Two-stage logging.** `proxy_results.tsv` tracks short proxy screening and
   `results.tsv` tracks long confirmation runs.
+- **Aggressive promotion gate.** A proxy candidate must beat the current proxy
+  baseline by at least `10%` without regressing `t150` before it earns a full
+  confirmation run.
 - **Local Windows/RTX target.** This clone is meant to feel closer to
   `autoresearch-win-rtx` than to the richer fluid sandbox.
 
