@@ -18,7 +18,7 @@ from mlfd.nonlinear import run_nonlinear_pipeline
 FIELD_NAME = "VORTALL"
 LAYOUT = "portrait"
 LATENT_DIM = 32
-AE_ARCHITECTURE = "residual_refine"
+AE_ARCHITECTURE = "residual_refine_gated"
 AE_WIDTH_MULT = 0.875
 COORDCONV = False
 COARSE_LOSS_WEIGHT = 0.25
