@@ -247,6 +247,52 @@ class ResidualRefineAutoencoder(ResidualConvAutoencoder):
         return reconstruction
 
 
+class GatedResidualRefineAutoencoder(ResidualConvAutoencoder):
+    def __init__(
+        self,
+        input_shape: tuple[int, int],
+        latent_dim: int,
+        width_mult: float = 1.0,
+        coordconv: bool = False,
+        refine_blocks: int = 1,
+        refine_channels_mult: float = 1.0,
+    ) -> None:
+        super().__init__(input_shape, latent_dim, width_mult=width_mult, coordconv=coordconv)
+        self.refine_blocks = max(1, refine_blocks)
+        refine_channels = _scaled_channels(self.stem_channels, refine_channels_mult)
+        layers: list[nn.Module] = [
+            nn.Conv2d(self.stem_channels + 1, refine_channels, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+        ]
+        for _ in range(self.refine_blocks):
+            layers.append(ResidualBlock(refine_channels))
+        self.refine_features = nn.Sequential(*layers)
+        self.refine_head = nn.Conv2d(refine_channels, 1, kernel_size=3, padding=1)
+        self.gate_head = nn.Sequential(
+            nn.Conv2d(refine_channels, 1, kernel_size=1),
+            nn.Sigmoid(),
+        )
+        self.coarse_head = nn.Conv2d(self.stem_channels, 1, kernel_size=3, padding=1)
+
+    def decode_with_aux(self, z: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        hidden = self._decode_features(z)
+        coarse = self.coarse_head(hidden)
+        refine_input = torch.cat([hidden, coarse], dim=1)
+        refine_features = self.refine_features(refine_input)
+        refine_residual = self.refine_head(refine_features)
+        refine_gate = self.gate_head(refine_features)
+        final = coarse + refine_gate * refine_residual
+        return final, {
+            "coarse": coarse,
+            "refine_residual": refine_residual,
+            "refine_gate": refine_gate,
+        }
+
+    def decode(self, z: torch.Tensor) -> torch.Tensor:
+        reconstruction, _ = self.decode_with_aux(z)
+        return reconstruction
+
+
 class ResidualMultiscaleAutoencoder(nn.Module, CoordInputMixin):
     def __init__(
         self,
@@ -380,6 +426,15 @@ def build_autoencoder(
         return ResidualConvAutoencoder(input_shape, latent_dim, width_mult=width_mult, coordconv=coordconv)
     if architecture == "residual_refine":
         return ResidualRefineAutoencoder(
+            input_shape,
+            latent_dim,
+            width_mult=width_mult,
+            coordconv=coordconv,
+            refine_blocks=refine_blocks,
+            refine_channels_mult=refine_channels_mult,
+        )
+    if architecture == "residual_refine_gated":
+        return GatedResidualRefineAutoencoder(
             input_shape,
             latent_dim,
             width_mult=width_mult,
