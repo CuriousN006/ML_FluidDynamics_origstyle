@@ -17,7 +17,7 @@ from mlfd.nonlinear import run_nonlinear_pipeline
 # Main experiment surface. Edit these defaults directly during autoresearch.
 FIELD_NAME = "VORTALL"
 LAYOUT = "portrait"
-LATENT_DIM = 24
+LATENT_DIM = 32
 AE_ARCHITECTURE = "residual_refine"
 AE_WIDTH_MULT = 0.875
 COORDCONV = False
@@ -40,7 +40,7 @@ DYN_L2_WEIGHT = 0.0
 GRADIENT_LOSS_WEIGHT = 0.1
 FFT_LOSS_WEIGHT = 0.0
 ROLLOUT_LOSS_WEIGHT = 0.10
-DYNAMICS_HIDDEN_DIM = 24
+DYNAMICS_HIDDEN_DIM = 32
 DYNAMICS_DEPTH = 2
 TRAIN_ROLLOUT_STRIDE = 8
 TRAIN_ROLLOUT_HORIZON = 24
