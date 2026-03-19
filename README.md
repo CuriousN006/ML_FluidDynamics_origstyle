@@ -69,7 +69,8 @@ Current active campaign:
 - campaign tag: `speed90_same_score_faster_v1`
 - active starting code: current proxy champion `residual_refine_gated`
 - first success target: `primary_score <= 0.000268580764`
-- required wall-clock cap: `wall_seconds <= 5400`
+- required training-time cap: `wall_seconds <= 5400`
+- diagnostics also record `wall_seconds_end_to_end` for full pipeline time
 - long-run `results.tsv` champion remains the quality anchor during this campaign
 
 Archived pre-reset notes and ledgers live under `archive/`.

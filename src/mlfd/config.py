@@ -108,10 +108,14 @@ class NonlinearConfig:
     ae_cosine_t0_epochs: int = 64
     ae_cosine_tmult: int = 2
     ae_cosine_eta_min: float | None = None
+    ae_budget_lr_floor_fraction: float = 0.75
     ae_use_swa: bool = False
     ae_swa_start_fraction: float = 0.75
     ae_swa_lr: float = 1e-5
     ae_use_curriculum: bool = False
+    ae_curriculum_finish_fraction: float = 0.8
+    ae_curriculum_coarse_start: float = 0.40
+    ae_curriculum_gradient_start: float = 0.05
     validation_rollout_weight: float = 0.25
     train_rollout_stride: int = 8
     train_rollout_horizon: int = 16

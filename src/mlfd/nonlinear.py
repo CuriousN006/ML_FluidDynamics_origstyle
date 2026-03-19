@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import math
 import time
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
@@ -100,6 +101,24 @@ class AutoencoderLossWeights:
 class SchedulerBundle:
     name: str
     scheduler: ReduceLROnPlateau | CosineAnnealingWarmRestarts | None
+
+
+def _set_optimizer_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
+    for param_group in optimizer.param_groups:
+        param_group["lr"] = lr
+
+
+def _cosine_floor_lr(
+    *,
+    base_lr: float,
+    min_lr: float,
+    progress: float,
+    floor_fraction: float,
+) -> float:
+    clamped_fraction = max(floor_fraction, 1e-6)
+    phase = min(max(progress / clamped_fraction, 0.0), 1.0)
+    cosine = 0.5 * (1.0 + math.cos(math.pi * phase))
+    return float(min_lr + ((base_lr - min_lr) * cosine))
 
 
 def _denormalize(x: torch.Tensor | np.ndarray, stats: NormalizationStats) -> torch.Tensor | np.ndarray:
@@ -249,6 +268,8 @@ def _build_scheduler(
                 eta_min=min_lr if cosine_eta_min is None else cosine_eta_min,
             ),
         )
+    if name == "cosine_budget_floor":
+        return SchedulerBundle(name="cosine_budget_floor", scheduler=None)
     raise ValueError(f"Unsupported scheduler type: {name}")
 
 
@@ -412,7 +433,7 @@ def _ae_training_loss_weights(
     elapsed_seconds: float,
     budget_seconds: float | None,
     epoch_index: int,
-) -> tuple[AutoencoderLossWeights, float]:
+) -> tuple[AutoencoderLossWeights, float, float]:
     progress = _progress_fraction(
         elapsed_seconds=elapsed_seconds,
         budget_seconds=budget_seconds,
@@ -428,34 +449,33 @@ def _ae_training_loss_weights(
                 coarse_loss_weight=config.coarse_loss_weight,
             ),
             progress,
+            progress,
         )
-    curriculum_progress = min(progress / 0.8, 1.0)
-    coarse_loss_weight = 0.40 + (curriculum_progress * (0.15 - 0.40))
-    gradient_loss_weight = 0.05 + (curriculum_progress * (0.10 - 0.05))
+    curriculum_progress = min(progress / max(config.ae_curriculum_finish_fraction, 1e-6), 1.0)
+    coarse_loss_weight = config.ae_curriculum_coarse_start + (
+        curriculum_progress * (config.coarse_loss_weight - config.ae_curriculum_coarse_start)
+    )
+    gradient_loss_weight = config.ae_curriculum_gradient_start + (
+        curriculum_progress * (config.gradient_loss_weight - config.ae_curriculum_gradient_start)
+    )
     return (
         AutoencoderLossWeights(
             gradient_loss_weight=gradient_loss_weight,
-            fft_loss_weight=0.0,
+            fft_loss_weight=config.fft_loss_weight,
             latent_l1_weight=config.latent_l1_weight,
             coarse_loss_weight=coarse_loss_weight,
         ),
         progress,
+        curriculum_progress,
     )
 
 
 def _ae_validation_loss_weights(config: NonlinearConfig) -> AutoencoderLossWeights:
-    if not config.ae_use_curriculum:
-        return AutoencoderLossWeights(
-            gradient_loss_weight=config.gradient_loss_weight,
-            fft_loss_weight=config.fft_loss_weight,
-            latent_l1_weight=config.latent_l1_weight,
-            coarse_loss_weight=config.coarse_loss_weight,
-        )
     return AutoencoderLossWeights(
-        gradient_loss_weight=0.10,
-        fft_loss_weight=0.0,
+        gradient_loss_weight=config.gradient_loss_weight,
+        fft_loss_weight=config.fft_loss_weight,
         latent_l1_weight=config.latent_l1_weight,
-        coarse_loss_weight=0.15,
+        coarse_loss_weight=config.coarse_loss_weight,
     )
 
 
@@ -475,6 +495,34 @@ def _should_start_swa(
         total_epochs=config.ae_epochs,
     )
     return progress >= config.ae_swa_start_fraction
+
+
+def _apply_ae_scheduler(
+    scheduler: SchedulerBundle,
+    optimizer: torch.optim.Optimizer,
+    config: NonlinearConfig,
+    *,
+    elapsed_seconds: float,
+    budget_seconds: float | None,
+    epoch_index: int,
+    metric: float | None = None,
+) -> None:
+    if scheduler.name == "cosine_budget_floor":
+        progress = _progress_fraction(
+            elapsed_seconds=elapsed_seconds,
+            budget_seconds=budget_seconds,
+            epoch_index=epoch_index,
+            total_epochs=config.ae_epochs,
+        )
+        target_lr = _cosine_floor_lr(
+            base_lr=config.ae_learning_rate,
+            min_lr=config.ae_min_learning_rate,
+            progress=progress,
+            floor_fraction=config.ae_budget_lr_floor_fraction,
+        )
+        _set_optimizer_lr(optimizer, target_lr)
+        return
+    _step_scheduler(scheduler, metric=metric)
 
 
 def _encode_all_frames(
@@ -657,6 +705,7 @@ def _train_autoencoder(
         "learning_rate": [],
         "coarse_loss_weight": [],
         "gradient_loss_weight": [],
+        "progress_fraction": [],
         "curriculum_progress": [],
     }
     best_state = copy.deepcopy(model.state_dict())
@@ -671,17 +720,19 @@ def _train_autoencoder(
     swa_val_loss: float | None = None
     selected_model_source = "best_checkpoint"
     selected_val_loss = best_loss
+    scaler = _make_grad_scaler(config.use_amp, device)
 
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
 
-    start = time.perf_counter()
+    phase_start = time.perf_counter()
+    train_start = phase_start
     for epoch_idx in tqdm(range(config.ae_epochs), desc="AE", leave=False):
         model.train()
         batch_losses = []
         time_budget_hit = False
-        epoch_elapsed = time.perf_counter() - start
-        train_loss_weights, curriculum_progress = _ae_training_loss_weights(
+        epoch_elapsed = time.perf_counter() - train_start
+        train_loss_weights, progress_fraction, curriculum_progress = _ae_training_loss_weights(
             config,
             elapsed_seconds=epoch_elapsed,
             budget_seconds=config.ae_train_budget_seconds,
@@ -689,22 +740,28 @@ def _train_autoencoder(
         )
         for batch in train_loader:
             batch = batch.to(device)
-            latent = model.encode(batch)  # type: ignore[attr-defined]
-            recon, auxiliary_outputs = _decode_autoencoder(model, latent)
-            loss = _autoencoder_reconstruction_loss(
-                recon,
-                batch,
-                latent=latent,
-                config=config,
-                auxiliary_outputs=auxiliary_outputs,
-                loss_weights=train_loss_weights,
-            )
             optimizer.zero_grad(set_to_none=True)
-            loss.backward()
-            optimizer.step()
+            with _autocast_context(config.use_amp, device):
+                latent = model.encode(batch)  # type: ignore[attr-defined]
+                recon, auxiliary_outputs = _decode_autoencoder(model, latent)
+                loss = _autoencoder_reconstruction_loss(
+                    recon,
+                    batch,
+                    latent=latent,
+                    config=config,
+                    auxiliary_outputs=auxiliary_outputs,
+                    loss_weights=train_loss_weights,
+                )
+            if scaler is None:
+                loss.backward()
+                optimizer.step()
+            else:
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
             batch_losses.append(loss.item())
             batches_ran += 1
-            if _budget_exhausted(start, config.ae_train_budget_seconds):
+            if _budget_exhausted(train_start, config.ae_train_budget_seconds):
                 time_budget_hit = True
                 break
         if not batch_losses:
@@ -721,7 +778,7 @@ def _train_autoencoder(
         train_loss = float(np.mean(batch_losses))
         history["train_loss"].append(train_loss)
         history["val_loss"].append(val_loss)
-        epoch_elapsed = time.perf_counter() - start
+        epoch_elapsed = time.perf_counter() - train_start
         if swa_model is not None and not swa_started and _should_start_swa(
             config=config,
             elapsed_seconds=epoch_elapsed,
@@ -729,16 +786,24 @@ def _train_autoencoder(
             epoch_count=len(history["val_loss"]),
         ):
             swa_started = True
-            for param_group in optimizer.param_groups:
-                param_group["lr"] = config.ae_swa_lr
+            _set_optimizer_lr(optimizer, config.ae_swa_lr)
         if not swa_started:
-            _step_scheduler(scheduler, metric=val_loss)
+            _apply_ae_scheduler(
+                scheduler,
+                optimizer,
+                config,
+                elapsed_seconds=epoch_elapsed,
+                budget_seconds=config.ae_train_budget_seconds,
+                epoch_index=len(history["val_loss"]),
+                metric=val_loss,
+            )
         if swa_model is not None and swa_started:
             swa_model.update_parameters(model)
             swa_updates += 1
         history["learning_rate"].append(float(optimizer.param_groups[0]["lr"]))
         history["coarse_loss_weight"].append(float(train_loss_weights.coarse_loss_weight))
         history["gradient_loss_weight"].append(float(train_loss_weights.gradient_loss_weight))
+        history["progress_fraction"].append(float(progress_fraction))
         history["curriculum_progress"].append(float(curriculum_progress))
         if val_loss < best_loss:
             best_loss = val_loss
@@ -752,7 +817,7 @@ def _train_autoencoder(
         if patience >= config.early_stopping_patience:
             stop_reason = "early_stopping"
             break
-    ae_seconds = time.perf_counter() - start
+    ae_seconds = time.perf_counter() - train_start
     model.load_state_dict(best_state)
     selected_val_loss = best_loss
     if swa_model is not None and swa_updates > 0:
@@ -809,6 +874,7 @@ def _train_autoencoder(
         device,
         config.use_amp,
     )
+    ae_end_to_end_seconds = time.perf_counter() - phase_start
     peak_memory_gb = float(torch.cuda.max_memory_allocated(device) / (1024**3)) if device.type == "cuda" else 0.0
     metrics = {
         "snapshot_indices": split.snapshot_indices(),
@@ -820,6 +886,8 @@ def _train_autoencoder(
         "coarse_recon_nrmse": coarse_summary.nrmse,
         "history": history,
         "ae_seconds": ae_seconds,
+        "ae_end_to_end_seconds": ae_end_to_end_seconds,
+        "ae_artifact_seconds": max(0.0, ae_end_to_end_seconds - ae_seconds),
         "ae_train_budget_seconds": config.ae_train_budget_seconds,
         "epochs_ran": len(history["val_loss"]),
         "batches_ran": batches_ran,
@@ -892,36 +960,45 @@ def _train_dynamics(
     train_starts = _rollout_start_indices(train_idx, config.train_rollout_stride)
     stop_reason = "epoch_limit"
     batches_ran = 0
+    scaler = _make_grad_scaler(config.use_amp, device)
 
-    start = time.perf_counter()
+    phase_start = time.perf_counter()
+    train_start = phase_start
     for _ in tqdm(range(config.dyn_epochs), desc="Dyn", leave=False):
         model.train()
-        prediction = model(latent_tensor[train_idx])
-        target = latent_tensor[train_idx + 1]
-        one_step_loss = F.mse_loss(prediction, target)
-        rollout_loss = _multi_start_rollout_loss(
-            model,
-            latent_tensor,
-            start_indices=train_starts,
-            horizon=min(config.train_rollout_horizon, len(train_idx)),
-            max_target_exclusive=split.snapshot_train_stop,
-        )
-        loss = one_step_loss + (config.rollout_loss_weight * rollout_loss) + (config.dyn_l2_weight * _regularization_l2(model))
         optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        optimizer.step()
+        with _autocast_context(config.use_amp, device):
+            prediction = model(latent_tensor[train_idx])
+            target = latent_tensor[train_idx + 1]
+            one_step_loss = F.mse_loss(prediction, target)
+            rollout_loss = _multi_start_rollout_loss(
+                model,
+                latent_tensor,
+                start_indices=train_starts,
+                horizon=min(config.train_rollout_horizon, len(train_idx)),
+                max_target_exclusive=split.snapshot_train_stop,
+            )
+            loss = one_step_loss + (config.rollout_loss_weight * rollout_loss) + (config.dyn_l2_weight * _regularization_l2(model))
+        if scaler is None:
+            loss.backward()
+            optimizer.step()
+        else:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
         batches_ran += 1
-        time_budget_hit = _budget_exhausted(start, config.dyn_train_budget_seconds)
+        time_budget_hit = _budget_exhausted(train_start, config.dyn_train_budget_seconds)
 
         model.eval()
         with torch.no_grad():
-            val_one_step, val_rollout, val_loss = _dynamics_validation_terms(
-                model,
-                latent_tensor,
-                val_idx,
-                config,
-                max_target_exclusive=split.snapshot_val_stop,
-            )
+            with _autocast_context(config.use_amp, device):
+                val_one_step, val_rollout, val_loss = _dynamics_validation_terms(
+                    model,
+                    latent_tensor,
+                    val_idx,
+                    config,
+                    max_target_exclusive=split.snapshot_val_stop,
+                )
         history["train_loss"].append(loss.item())
         history["val_loss"].append(val_loss.item())
         history["val_one_step_loss"].append(val_one_step.item())
@@ -940,7 +1017,7 @@ def _train_dynamics(
         if patience >= config.early_stopping_patience:
             stop_reason = "early_stopping"
             break
-    dyn_seconds = time.perf_counter() - start
+    dyn_seconds = time.perf_counter() - train_start
     model.load_state_dict(best_state)
     save_training_curves(
         {key: value for key, value in history.items() if key != "learning_rate"},
@@ -998,11 +1075,14 @@ def _train_dynamics(
         config,
     )
 
+    dyn_end_to_end_seconds = time.perf_counter() - phase_start
     peak_memory_gb = float(torch.cuda.max_memory_allocated(device) / (1024**3)) if device.type == "cuda" else 0.0
     return {
         "transition_indices": split.transition_indices(),
         "history": history,
         "dyn_seconds": dyn_seconds,
+        "dyn_end_to_end_seconds": dyn_end_to_end_seconds,
+        "dyn_artifact_seconds": max(0.0, dyn_end_to_end_seconds - dyn_seconds),
         "dyn_train_budget_seconds": config.dyn_train_budget_seconds,
         "epochs_ran": len(history["val_loss"]),
         "batches_ran": batches_ran,
@@ -1108,7 +1188,9 @@ def run_nonlinear_pipeline(
             "ae_floor_rmse_t150": ae_floor_t150["rmse"],
             "ae_floor_nrmse_t150": ae_floor_t150["nrmse"],
             "peak_memory_gb": ae_metrics["peak_memory_gb_after_ae"],
+            "wall_seconds_mode": "training_only",
             "wall_seconds": ae_wall_seconds,
+            "wall_seconds_end_to_end": ae_metrics["ae_end_to_end_seconds"],
             "artifacts": {
                 "truth_portrait": "truth_portrait.png",
                 "truth_wake_zoom": "truth_wake_zoom.png",
@@ -1132,6 +1214,7 @@ def run_nonlinear_pipeline(
     linear_t150 = linear_metrics.get("step_150", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
     overall_score = primary_score(ae_metrics["recon_nrmse"], step_100["nrmse"], step_150["nrmse"])
     wall_seconds = ae_metrics["ae_seconds"] + dyn_metrics["dyn_seconds"]
+    wall_seconds_end_to_end = ae_metrics["ae_end_to_end_seconds"] + dyn_metrics["dyn_end_to_end_seconds"]
     met_speed_target = bool(
         config.target_primary_score is not None
         and config.target_wall_seconds is not None
@@ -1182,7 +1265,9 @@ def run_nonlinear_pipeline(
         "linear_latent_rmse_t100": linear_t100["rmse"],
         "linear_latent_rmse_t150": linear_t150["rmse"],
         "peak_memory_gb": max(ae_metrics["peak_memory_gb_after_ae"], dyn_metrics["peak_memory_gb_after_dyn"]),
+        "wall_seconds_mode": "training_only",
         "wall_seconds": wall_seconds,
+        "wall_seconds_end_to_end": wall_seconds_end_to_end,
         "artifacts": {
             "truth_portrait": "truth_portrait.png",
             "truth_wake_zoom": "truth_wake_zoom.png",

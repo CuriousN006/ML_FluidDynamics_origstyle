@@ -21,7 +21,7 @@ LATENT_DIM = 32
 AE_ARCHITECTURE = "residual_refine_gated"
 AE_WIDTH_MULT = 0.875
 COORDCONV = False
-COARSE_LOSS_WEIGHT = 0.25
+COARSE_LOSS_WEIGHT = 0.15
 COARSE_BLUR_KERNEL = 9
 COARSE_BLUR_SIGMA = 2.0
 REFINE_BLOCKS = 1
@@ -32,7 +32,7 @@ DYN_EPOCHS = 1800
 BATCH_SIZE = 16
 AE_LEARNING_RATE = 1e-3
 DYN_LEARNING_RATE = 5e-4
-AE_SCHEDULER = "cosine_restarts"
+AE_SCHEDULER = "cosine_budget_floor"
 DYN_SCHEDULER = "none"
 WEIGHT_DECAY = 1e-5
 LATENT_L1_WEIGHT = 1e-4
@@ -63,10 +63,14 @@ SPEED90_TARGET_WALL_SECONDS = 5400.0
 AE_COSINE_T0_EPOCHS = 64
 AE_COSINE_TMULT = 2
 AE_COSINE_ETA_MIN = AE_MIN_LEARNING_RATE
+AE_BUDGET_LR_FLOOR_FRACTION = 0.75
 AE_USE_SWA = False
 AE_SWA_START_FRACTION = 0.75
 AE_SWA_LR = 1e-5
 AE_USE_CURRICULUM = True
+AE_CURRICULUM_FINISH_FRACTION = 0.8
+AE_CURRICULUM_COARSE_START = 0.40
+AE_CURRICULUM_GRADIENT_START = 0.05
 
 
 def build_config(*, smoke: bool, device_override: str | None, profile: str) -> NonlinearConfig:
@@ -114,10 +118,14 @@ def build_config(*, smoke: bool, device_override: str | None, profile: str) -> N
         ae_cosine_t0_epochs=AE_COSINE_T0_EPOCHS,
         ae_cosine_tmult=AE_COSINE_TMULT,
         ae_cosine_eta_min=AE_COSINE_ETA_MIN,
+        ae_budget_lr_floor_fraction=AE_BUDGET_LR_FLOOR_FRACTION,
         ae_use_swa=AE_USE_SWA,
         ae_swa_start_fraction=AE_SWA_START_FRACTION,
         ae_swa_lr=AE_SWA_LR,
         ae_use_curriculum=AE_USE_CURRICULUM,
+        ae_curriculum_finish_fraction=AE_CURRICULUM_FINISH_FRACTION,
+        ae_curriculum_coarse_start=AE_CURRICULUM_COARSE_START,
+        ae_curriculum_gradient_start=AE_CURRICULUM_GRADIENT_START,
         weight_decay=WEIGHT_DECAY,
         latent_l1_weight=LATENT_L1_WEIGHT,
         dyn_l2_weight=DYN_L2_WEIGHT,

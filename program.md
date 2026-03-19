@@ -108,7 +108,7 @@ The active campaign is now `speed90_same_score_faster_v1`.
 
 - start from the current proxy-champion code in `train.py`
 - keep the long-run full champion as the quality anchor
-- first success target: `primary_score <= 0.000268580764` within `wall_seconds <= 5400`
+- first success target: `primary_score <= 0.000268580764` within training-time `wall_seconds <= 5400`
 - pause the proxy loop for this campaign; do not log 90-minute runs to `results.tsv`
 
 ## Run command
@@ -134,9 +134,14 @@ Key fields to look at:
 - `primary_score`
 - `peak_memory_gb`
 - `wall_seconds`
+- `wall_seconds_end_to_end`
 - `recon_rmse`
 - `rmse_t100`
 - `rmse_t150`
+
+`wall_seconds` is the training-time budget metric used for campaign gating.
+`wall_seconds_end_to_end` is a diagnostic that includes post-training artifact
+generation and evaluation.
 
 If `metrics.json` is missing, the run crashed.
 
@@ -193,7 +198,7 @@ LOOP FOREVER:
    score seen so far. Declare campaign success only when:
 
    - `primary_score <= 0.000268580764`
-   - `wall_seconds <= 5400`
+   - training-time `wall_seconds <= 5400`
 
 9. Only use a long full rerun after the speed90 campaign finds a clear winner
    that deserves long-run confirmation:
