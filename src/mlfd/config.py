@@ -69,6 +69,10 @@ class NonlinearConfig:
     field_name: str = "VORTALL"
     layout: str = "portrait"
     profile: str = "full"
+    campaign: str | None = None
+    reference_full_score: float | None = None
+    target_primary_score: float | None = None
+    target_wall_seconds: float | None = None
     seed: int = 42
     latent_dim: int = 32
     ae_architecture: str = "residual_refine"
@@ -101,6 +105,13 @@ class NonlinearConfig:
     dyn_scheduler_patience: int = 12
     ae_min_learning_rate: float = 1e-5
     dyn_min_learning_rate: float = 1e-5
+    ae_cosine_t0_epochs: int = 64
+    ae_cosine_tmult: int = 2
+    ae_cosine_eta_min: float | None = None
+    ae_use_swa: bool = False
+    ae_swa_start_fraction: float = 0.75
+    ae_swa_lr: float = 1e-5
+    ae_use_curriculum: bool = False
     validation_rollout_weight: float = 0.25
     train_rollout_stride: int = 8
     train_rollout_horizon: int = 16

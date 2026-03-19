@@ -21,6 +21,8 @@ This workspace is intentionally treated as if only a few files really matter:
 - **`results.tsv`** — untracked experiment ledger. Do not commit it.
 - **`proxy_results.tsv`** — untracked short-budget screening ledger. Do not
   commit it.
+- **`speed_results.tsv`** — untracked 90-minute speed campaign ledger. Do not
+  commit it.
 
 ## Project structure
 
@@ -56,10 +58,19 @@ Current comparison status:
 
 - `results.tsv` is the active full-run scoreboard
 - `proxy_results.tsv` is the active short-budget screening ledger
+- `speed_results.tsv` is the active 90-minute same-score-faster scoreboard
 - local `DMD` baseline output: `output/linear/mar17-assignment-dmd-baseline-01/`
 - local `DMD` baseline: rank `15`, `primary_score=0.000466643474`
 - local `DMD` baseline: `recon_nrmse=0.000163697573`, `nrmse_t100=0.000496426162`, `nrmse_t150=0.000569952222`
 - current nonlinear champion `d8c36d7` is lower at `0.000255791203`
+
+Current active campaign:
+
+- campaign tag: `speed90_same_score_faster_v1`
+- active starting code: current proxy champion `residual_refine_gated`
+- first success target: `primary_score <= 0.000268580764`
+- required wall-clock cap: `wall_seconds <= 5400`
+- long-run `results.tsv` champion remains the quality anchor during this campaign
 
 Archived pre-reset notes and ledgers live under `archive/`.
 
@@ -99,9 +110,10 @@ The `program.md` file is the main control surface.
   loses is reset away.
 - **Two-stage logging.** `proxy_results.tsv` tracks short proxy screening and
   `results.tsv` tracks long confirmation runs.
-- **Aggressive promotion gate.** A proxy candidate must beat the proxy score of
-  the latest full-validated champion by at least `20%` without regressing
-  `t150` before it earns a full confirmation run.
+- **Parallel speed campaign.** `speed_results.tsv` tracks the current 90-minute
+  same-score-faster campaign without replacing the long-run champion.
+- **Campaign gating.** The active campaign tries to hit the long-run champion
+  within a fixed 90-minute training budget before resuming broader proxy work.
 - **Local Windows/RTX target.** This clone is meant to feel closer to
   `autoresearch-win-rtx` than to the richer fluid sandbox.
 

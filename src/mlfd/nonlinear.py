@@ -11,7 +11,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts, ReduceLROnPlateau
+from torch.optim.swa_utils import AveragedModel
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
@@ -87,6 +88,20 @@ class SnapshotMetricSummary:
     nrmse: float
 
 
+@dataclass(frozen=True)
+class AutoencoderLossWeights:
+    gradient_loss_weight: float
+    fft_loss_weight: float
+    latent_l1_weight: float
+    coarse_loss_weight: float
+
+
+@dataclass(frozen=True)
+class SchedulerBundle:
+    name: str
+    scheduler: ReduceLROnPlateau | CosineAnnealingWarmRestarts | None
+
+
 def _denormalize(x: torch.Tensor | np.ndarray, stats: NormalizationStats) -> torch.Tensor | np.ndarray:
     return (x * stats.std) + stats.mean
 
@@ -153,17 +168,24 @@ def _autoencoder_reconstruction_loss(
     latent: torch.Tensor | None,
     config: NonlinearConfig,
     auxiliary_outputs: dict[str, torch.Tensor] | None = None,
+    loss_weights: AutoencoderLossWeights | None = None,
 ) -> torch.Tensor:
+    weights = loss_weights or AutoencoderLossWeights(
+        gradient_loss_weight=config.gradient_loss_weight,
+        fft_loss_weight=config.fft_loss_weight,
+        latent_l1_weight=config.latent_l1_weight,
+        coarse_loss_weight=config.coarse_loss_weight,
+    )
     loss = F.mse_loss(prediction, target)
-    if config.gradient_loss_weight > 0.0:
-        loss = loss + (config.gradient_loss_weight * _gradient_l1(prediction, target))
-    if config.fft_loss_weight > 0.0:
-        loss = loss + (config.fft_loss_weight * _fft_magnitude_l1(prediction, target))
-    if latent is not None and config.latent_l1_weight > 0.0:
-        loss = loss + (config.latent_l1_weight * latent.abs().mean())
-    if auxiliary_outputs and config.coarse_loss_weight > 0.0 and "coarse" in auxiliary_outputs:
+    if weights.gradient_loss_weight > 0.0:
+        loss = loss + (weights.gradient_loss_weight * _gradient_l1(prediction, target))
+    if weights.fft_loss_weight > 0.0:
+        loss = loss + (weights.fft_loss_weight * _fft_magnitude_l1(prediction, target))
+    if latent is not None and weights.latent_l1_weight > 0.0:
+        loss = loss + (weights.latent_l1_weight * latent.abs().mean())
+    if auxiliary_outputs and weights.coarse_loss_weight > 0.0 and "coarse" in auxiliary_outputs:
         coarse_target = _gaussian_blur(target, config.coarse_blur_kernel, config.coarse_blur_sigma)
-        loss = loss + (config.coarse_loss_weight * F.mse_loss(auxiliary_outputs["coarse"], coarse_target))
+        loss = loss + (weights.coarse_loss_weight * F.mse_loss(auxiliary_outputs["coarse"], coarse_target))
     return loss
 
 
@@ -199,18 +221,46 @@ def _build_scheduler(
     factor: float,
     patience: int,
     min_lr: float,
-) -> ReduceLROnPlateau | None:
+    *,
+    cosine_t0_epochs: int | None = None,
+    cosine_tmult: int | None = None,
+    cosine_eta_min: float | None = None,
+) -> SchedulerBundle:
     if name == "none":
-        return None
+        return SchedulerBundle(name="none", scheduler=None)
     if name == "plateau":
-        return ReduceLROnPlateau(
-            optimizer,
-            mode="min",
-            factor=factor,
-            patience=patience,
-            min_lr=min_lr,
-    )
+        return SchedulerBundle(
+            name="plateau",
+            scheduler=ReduceLROnPlateau(
+                optimizer,
+                mode="min",
+                factor=factor,
+                patience=patience,
+                min_lr=min_lr,
+            ),
+        )
+    if name == "cosine_restarts":
+        return SchedulerBundle(
+            name="cosine_restarts",
+            scheduler=CosineAnnealingWarmRestarts(
+                optimizer,
+                T_0=max(1, cosine_t0_epochs or 1),
+                T_mult=max(1, cosine_tmult or 1),
+                eta_min=min_lr if cosine_eta_min is None else cosine_eta_min,
+            ),
+        )
     raise ValueError(f"Unsupported scheduler type: {name}")
+
+
+def _step_scheduler(bundle: SchedulerBundle, *, metric: float | None = None) -> None:
+    if bundle.scheduler is None:
+        return
+    if bundle.name == "plateau":
+        if metric is None:
+            raise ValueError("Plateau scheduler requires a validation metric.")
+        bundle.scheduler.step(metric)
+        return
+    bundle.scheduler.step()
 
 
 def _budget_exhausted(start_time: float, budget_seconds: float | None) -> bool:
@@ -308,6 +358,7 @@ def _evaluate_autoencoder(
     device: torch.device,
     stats: NormalizationStats,
     config: NonlinearConfig,
+    loss_weights: AutoencoderLossWeights | None = None,
 ) -> tuple[float, SnapshotMetricSummary, list[tuple[np.ndarray, np.ndarray]], SnapshotMetricSummary]:
     model.eval()
     losses = []
@@ -325,6 +376,7 @@ def _evaluate_autoencoder(
                     latent=None,
                     config=config,
                     auxiliary_outputs=auxiliary_outputs,
+                    loss_weights=loss_weights,
                 )
             losses.append(loss.item())
             truth = _denormalize(batch.float(), stats).cpu().numpy()
@@ -340,6 +392,89 @@ def _evaluate_autoencoder(
         truth_pred_pairs,
         _summarize_snapshot_pairs(coarse_pairs),
     )
+
+
+def _progress_fraction(
+    *,
+    elapsed_seconds: float,
+    budget_seconds: float | None,
+    epoch_index: int,
+    total_epochs: int,
+) -> float:
+    if budget_seconds is not None and budget_seconds > 0.0:
+        return float(min(max(elapsed_seconds / budget_seconds, 0.0), 1.0))
+    return float(min(max(epoch_index / max(1, total_epochs), 0.0), 1.0))
+
+
+def _ae_training_loss_weights(
+    config: NonlinearConfig,
+    *,
+    elapsed_seconds: float,
+    budget_seconds: float | None,
+    epoch_index: int,
+) -> tuple[AutoencoderLossWeights, float]:
+    progress = _progress_fraction(
+        elapsed_seconds=elapsed_seconds,
+        budget_seconds=budget_seconds,
+        epoch_index=epoch_index,
+        total_epochs=config.ae_epochs,
+    )
+    if not config.ae_use_curriculum:
+        return (
+            AutoencoderLossWeights(
+                gradient_loss_weight=config.gradient_loss_weight,
+                fft_loss_weight=config.fft_loss_weight,
+                latent_l1_weight=config.latent_l1_weight,
+                coarse_loss_weight=config.coarse_loss_weight,
+            ),
+            progress,
+        )
+    curriculum_progress = min(progress / 0.8, 1.0)
+    coarse_loss_weight = 0.40 + (curriculum_progress * (0.15 - 0.40))
+    gradient_loss_weight = 0.05 + (curriculum_progress * (0.10 - 0.05))
+    return (
+        AutoencoderLossWeights(
+            gradient_loss_weight=gradient_loss_weight,
+            fft_loss_weight=0.0,
+            latent_l1_weight=config.latent_l1_weight,
+            coarse_loss_weight=coarse_loss_weight,
+        ),
+        progress,
+    )
+
+
+def _ae_validation_loss_weights(config: NonlinearConfig) -> AutoencoderLossWeights:
+    if not config.ae_use_curriculum:
+        return AutoencoderLossWeights(
+            gradient_loss_weight=config.gradient_loss_weight,
+            fft_loss_weight=config.fft_loss_weight,
+            latent_l1_weight=config.latent_l1_weight,
+            coarse_loss_weight=config.coarse_loss_weight,
+        )
+    return AutoencoderLossWeights(
+        gradient_loss_weight=0.10,
+        fft_loss_weight=0.0,
+        latent_l1_weight=config.latent_l1_weight,
+        coarse_loss_weight=0.15,
+    )
+
+
+def _should_start_swa(
+    *,
+    config: NonlinearConfig,
+    elapsed_seconds: float,
+    budget_seconds: float | None,
+    epoch_count: int,
+) -> bool:
+    if not config.ae_use_swa:
+        return False
+    progress = _progress_fraction(
+        elapsed_seconds=elapsed_seconds,
+        budget_seconds=budget_seconds,
+        epoch_index=epoch_count,
+        total_epochs=config.ae_epochs,
+    )
+    return progress >= config.ae_swa_start_fraction
 
 
 def _encode_all_frames(
@@ -512,22 +647,46 @@ def _train_autoencoder(
         config.ae_scheduler_factor,
         config.ae_scheduler_patience,
         config.ae_min_learning_rate,
+        cosine_t0_epochs=config.ae_cosine_t0_epochs,
+        cosine_tmult=config.ae_cosine_tmult,
+        cosine_eta_min=config.ae_cosine_eta_min,
     )
-    history = {"train_loss": [], "val_loss": [], "learning_rate": []}
+    history = {
+        "train_loss": [],
+        "val_loss": [],
+        "learning_rate": [],
+        "coarse_loss_weight": [],
+        "gradient_loss_weight": [],
+        "curriculum_progress": [],
+    }
     best_state = copy.deepcopy(model.state_dict())
     best_loss = float("inf")
     patience = 0
     batches_ran = 0
     stop_reason = "epoch_limit"
+    eval_loss_weights = _ae_validation_loss_weights(config)
+    swa_model = AveragedModel(model) if config.ae_use_swa else None
+    swa_started = False
+    swa_updates = 0
+    swa_val_loss: float | None = None
+    selected_model_source = "best_checkpoint"
+    selected_val_loss = best_loss
 
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
 
     start = time.perf_counter()
-    for _ in tqdm(range(config.ae_epochs), desc="AE", leave=False):
+    for epoch_idx in tqdm(range(config.ae_epochs), desc="AE", leave=False):
         model.train()
         batch_losses = []
         time_budget_hit = False
+        epoch_elapsed = time.perf_counter() - start
+        train_loss_weights, curriculum_progress = _ae_training_loss_weights(
+            config,
+            elapsed_seconds=epoch_elapsed,
+            budget_seconds=config.ae_train_budget_seconds,
+            epoch_index=epoch_idx,
+        )
         for batch in train_loader:
             batch = batch.to(device)
             latent = model.encode(batch)  # type: ignore[attr-defined]
@@ -538,6 +697,7 @@ def _train_autoencoder(
                 latent=latent,
                 config=config,
                 auxiliary_outputs=auxiliary_outputs,
+                loss_weights=train_loss_weights,
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -550,13 +710,36 @@ def _train_autoencoder(
         if not batch_losses:
             stop_reason = "time_budget" if time_budget_hit else "epoch_limit"
             break
-        val_loss, _, _, _ = _evaluate_autoencoder(model, val_loader, device, stats, config)
+        val_loss, _, _, _ = _evaluate_autoencoder(
+            model,
+            val_loader,
+            device,
+            stats,
+            config,
+            loss_weights=eval_loss_weights,
+        )
         train_loss = float(np.mean(batch_losses))
         history["train_loss"].append(train_loss)
         history["val_loss"].append(val_loss)
-        if scheduler is not None:
-            scheduler.step(val_loss)
+        epoch_elapsed = time.perf_counter() - start
+        if swa_model is not None and not swa_started and _should_start_swa(
+            config=config,
+            elapsed_seconds=epoch_elapsed,
+            budget_seconds=config.ae_train_budget_seconds,
+            epoch_count=len(history["val_loss"]),
+        ):
+            swa_started = True
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = config.ae_swa_lr
+        if not swa_started:
+            _step_scheduler(scheduler, metric=val_loss)
+        if swa_model is not None and swa_started:
+            swa_model.update_parameters(model)
+            swa_updates += 1
         history["learning_rate"].append(float(optimizer.param_groups[0]["lr"]))
+        history["coarse_loss_weight"].append(float(train_loss_weights.coarse_loss_weight))
+        history["gradient_loss_weight"].append(float(train_loss_weights.gradient_loss_weight))
+        history["curriculum_progress"].append(float(curriculum_progress))
         if val_loss < best_loss:
             best_loss = val_loss
             best_state = copy.deepcopy(model.state_dict())
@@ -571,6 +754,22 @@ def _train_autoencoder(
             break
     ae_seconds = time.perf_counter() - start
     model.load_state_dict(best_state)
+    selected_val_loss = best_loss
+    if swa_model is not None and swa_updates > 0:
+        swa_val_loss, _, _, _ = _evaluate_autoencoder(
+            swa_model.module,
+            val_loader,
+            device,
+            stats,
+            config,
+            loss_weights=eval_loss_weights,
+        )
+        if swa_val_loss < best_loss:
+            model.load_state_dict(swa_model.module.state_dict())
+            selected_model_source = "swa"
+            selected_val_loss = swa_val_loss
+        else:
+            selected_model_source = "best_checkpoint"
 
     _, reconstruction_summary, preview_pairs, coarse_summary = _evaluate_autoencoder(model, test_loader, device, stats, config)
     save_training_curves(
@@ -625,6 +824,16 @@ def _train_autoencoder(
         "epochs_ran": len(history["val_loss"]),
         "batches_ran": batches_ran,
         "stop_reason": stop_reason,
+        "best_val_loss": best_loss,
+        "selected_val_loss": selected_val_loss,
+        "selected_model_source": selected_model_source,
+        "swa_enabled": config.ae_use_swa,
+        "swa_started": swa_started,
+        "swa_updates": swa_updates,
+        "swa_start_fraction": config.ae_swa_start_fraction,
+        "swa_lr": config.ae_swa_lr if config.ae_use_swa else None,
+        "swa_val_loss": swa_val_loss,
+        "curriculum_enabled": config.ae_use_curriculum,
         "stopped_for_time_budget": stop_reason == "time_budget",
         "stopped_for_early_stopping": stop_reason == "early_stopping",
         "stopped_for_epoch_limit": stop_reason == "epoch_limit",
@@ -717,8 +926,7 @@ def _train_dynamics(
         history["val_loss"].append(val_loss.item())
         history["val_one_step_loss"].append(val_one_step.item())
         history["val_rollout_loss"].append(val_rollout.item())
-        if scheduler is not None:
-            scheduler.step(val_loss.item())
+        _step_scheduler(scheduler, metric=val_loss.item())
         history["learning_rate"].append(float(optimizer.param_groups[0]["lr"]))
         if val_loss.item() < best_loss:
             best_loss = val_loss.item()
@@ -853,11 +1061,23 @@ def run_nonlinear_pipeline(
     coarse_t100 = coarse_floor_metrics.get("step_100", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
     coarse_t150 = coarse_floor_metrics.get("step_150", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
     ae_score = compute_ae_score(ae_metrics["recon_rmse"], ae_floor_t100["rmse"], ae_floor_t150["rmse"])
+    ae_wall_seconds = ae_metrics["ae_seconds"]
+    ae_met_speed_target = bool(
+        config.target_primary_score is not None
+        and config.target_wall_seconds is not None
+        and ae_score <= config.target_primary_score
+        and ae_wall_seconds <= config.target_wall_seconds
+    )
     if ae_only:
         metrics = {
             "created_at": utc_timestamp(),
             "evaluation_protocol": split.protocol,
             "profile": config.profile,
+            "campaign": config.campaign,
+            "reference_full_score": config.reference_full_score,
+            "target_primary_score": config.target_primary_score,
+            "target_wall_seconds": config.target_wall_seconds,
+            "met_speed_target": ae_met_speed_target,
             "field_name": bundle.field_name,
             "layout": config.layout,
             "summary": bundle.summary(),
@@ -888,7 +1108,7 @@ def run_nonlinear_pipeline(
             "ae_floor_rmse_t150": ae_floor_t150["rmse"],
             "ae_floor_nrmse_t150": ae_floor_t150["nrmse"],
             "peak_memory_gb": ae_metrics["peak_memory_gb_after_ae"],
-            "wall_seconds": ae_metrics["ae_seconds"],
+            "wall_seconds": ae_wall_seconds,
             "artifacts": {
                 "truth_portrait": "truth_portrait.png",
                 "truth_wake_zoom": "truth_wake_zoom.png",
@@ -911,11 +1131,23 @@ def run_nonlinear_pipeline(
     linear_t100 = linear_metrics.get("step_100", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
     linear_t150 = linear_metrics.get("step_150", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
     overall_score = primary_score(ae_metrics["recon_nrmse"], step_100["nrmse"], step_150["nrmse"])
+    wall_seconds = ae_metrics["ae_seconds"] + dyn_metrics["dyn_seconds"]
+    met_speed_target = bool(
+        config.target_primary_score is not None
+        and config.target_wall_seconds is not None
+        and overall_score <= config.target_primary_score
+        and wall_seconds <= config.target_wall_seconds
+    )
 
     metrics = {
         "created_at": utc_timestamp(),
         "evaluation_protocol": split.protocol,
         "profile": config.profile,
+        "campaign": config.campaign,
+        "reference_full_score": config.reference_full_score,
+        "target_primary_score": config.target_primary_score,
+        "target_wall_seconds": config.target_wall_seconds,
+        "met_speed_target": met_speed_target,
         "field_name": bundle.field_name,
         "layout": config.layout,
         "summary": bundle.summary(),
@@ -950,7 +1182,7 @@ def run_nonlinear_pipeline(
         "linear_latent_rmse_t100": linear_t100["rmse"],
         "linear_latent_rmse_t150": linear_t150["rmse"],
         "peak_memory_gb": max(ae_metrics["peak_memory_gb_after_ae"], dyn_metrics["peak_memory_gb_after_dyn"]),
-        "wall_seconds": ae_metrics["ae_seconds"] + dyn_metrics["dyn_seconds"],
+        "wall_seconds": wall_seconds,
         "artifacts": {
             "truth_portrait": "truth_portrait.png",
             "truth_wake_zoom": "truth_wake_zoom.png",

@@ -84,6 +84,7 @@ Active ledger and archive rules:
 
 - `results.tsv` is the active full-run scoreboard
 - `proxy_results.tsv` is the active screening ledger for short proxy runs
+- `speed_results.tsv` is the active ledger for the 90-minute same-score-faster campaign
 - archived pre-reset notes live under `archive/`
 - do not compare against archived nonlinear or imported `DMD` numbers in active decisions
 
@@ -101,17 +102,27 @@ still tracks only nonlinear experiments. Use the regenerated local `DMD`
 baseline above as the active fixed reference when deciding whether a nonlinear
 run is truly competitive.
 
+## Current campaign
+
+The active campaign is now `speed90_same_score_faster_v1`.
+
+- start from the current proxy-champion code in `train.py`
+- keep the long-run full champion as the quality anchor
+- first success target: `primary_score <= 0.000268580764` within `wall_seconds <= 5400`
+- pause the proxy loop for this campaign; do not log 90-minute runs to `results.tsv`
+
 ## Run command
 
 Launch one experiment like this:
 
 ```powershell
-python train.py --profile proxy --output-tag candidate > run.log 2>&1
+python train.py --profile speed90 --output-tag candidate90 > run.log 2>&1
 ```
 
-Use `--profile proxy` for the short screening budget and `--profile full` for
-the long confirmation run. The exact output tag is up to you. Keep it simple
-and unique per run.
+Use `--profile speed90` for the active 90-minute campaign, `--profile proxy` for
+short screening when the proxy loop is resumed, and `--profile full` for the
+long confirmation run. The exact output tag is up to you. Keep it simple and
+unique per run.
 
 When the run finishes, read:
 
@@ -132,8 +143,9 @@ If `metrics.json` is missing, the run crashed.
 ## Logging results
 
 When a proxy experiment is done, log it to `proxy_results.tsv` as tab-separated
-values. When a full experiment is done, log it to `results.tsv`. Do not commit
-either ledger.
+values. When a speed90 experiment is done, log it to `speed_results.tsv`. When
+a long full experiment is done, log it to `results.tsv`. Do not commit any of
+the ledgers.
 
 The TSV has a header row and 5 columns:
 
@@ -168,41 +180,45 @@ LOOP FOREVER:
 3. Hack `train.py` directly. Only open `src/mlfd/` if the idea cannot be
    expressed in `train.py`.
 4. `git commit` the candidate code.
-5. Run proxy screening first:
+5. For the active same-score-faster campaign, run speed90 first:
 
    ```powershell
-   python train.py --profile proxy --output-tag candidate > run.log 2>&1
+   python train.py --profile speed90 --output-tag candidate90 > run.log 2>&1
    ```
 
 6. Inspect `output/nonlinear/<output-tag>/metrics.json`. If it is missing, read
    the end of `run.log` for the failure.
-7. Record the proxy result in `proxy_results.tsv`.
-8. Promote to a full run only if proxy `primary_score` improves by at least
-   `20%` over the proxy score of the latest full-validated champion and
-   `nrmse_t150` does not regress.
-9. If promoted, run:
+7. Record the result in `speed_results.tsv`.
+8. Keep the current speed90 campaign leader if it improves the best speed90
+   score seen so far. Declare campaign success only when:
+
+   - `primary_score <= 0.000268580764`
+   - `wall_seconds <= 5400`
+
+9. Only use a long full rerun after the speed90 campaign finds a clear winner
+   that deserves long-run confirmation:
 
    ```powershell
    python train.py --profile full --output-tag candidate-full > run.log 2>&1
    ```
 
-10. Record full-run outcomes only in `results.tsv`.
-11. If the full `primary_score` improved, keep the commit and advance.
-12. If the full `primary_score` is equal or worse, `git reset` back to where
-    you started.
+10. Record long full outcomes only in `results.tsv`.
+11. If a long full rerun improves the long-run champion, keep the commit and advance.
+12. If a long full rerun is equal or worse, `git reset` back to where you started.
 
-Proxy audit rule:
+When this speed campaign ends, tighten the target in stages:
 
-- if 10 proxy runs pass without reaching the `20%` full-promotion threshold,
-  send the current best proxy candidate to one full audit run to check for
-  proxy drift.
+- stage 2 target: within `2%` of the long-run champion
+- stage 3 target: match or beat the long-run champion
 
 If a run crashes because of a small bug, fix it and try again. If the idea
 itself is broken, log it as `crash`, revert, and move on.
 
-**Proxy budget**: `--profile proxy` uses fixed training-time budgets of `10`
-minutes for AE and `3` minutes for dynamics, stopping on batch boundaries.
-`--profile full` keeps the long-run epoch-driven setup.
+**Profile budgets**:
+
+- `--profile proxy`: `10` minutes AE + `3` minutes dynamics, stopping on batch boundaries
+- `--profile speed90`: `85` minutes AE + `5` minutes dynamics, stopping on batch boundaries
+- `--profile full`: long-run epoch-driven setup
 
 **NEVER STOP**: once the loop begins, do not ask the human whether to continue.
 Keep iterating until manually interrupted.
