@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -470,6 +472,9 @@ class ResidualLinearDynamics(nn.Module):
         hidden_dim: int = 64,
         depth: int = 2,
         linear_init: torch.Tensor | None = None,
+        *,
+        residual_gate_max: float = 0.5,
+        residual_gate_init: float = 0.05,
     ) -> None:
         super().__init__()
         self.linear = nn.Linear(latent_dim, latent_dim, bias=False)
@@ -488,9 +493,29 @@ class ResidualLinearDynamics(nn.Module):
         if isinstance(final, nn.Linear):
             nn.init.zeros_(final.weight)
             nn.init.zeros_(final.bias)
+        clipped_gate_init = min(max(residual_gate_init, 1e-6), 1.0 - 1e-6)
+        init_logit = math.log(clipped_gate_init / (1.0 - clipped_gate_init))
+        self.residual_gate_logit = nn.Parameter(torch.tensor(init_logit, dtype=torch.float32))
+        self.residual_gate_max = float(residual_gate_max)
+        self.register_buffer("residual_schedule_scale", torch.tensor(1.0, dtype=torch.float32))
+
+    def set_residual_schedule_scale(self, value: float) -> None:
+        self.residual_schedule_scale.fill_(float(value))
+
+    def residual_gate(self) -> torch.Tensor:
+        return torch.sigmoid(self.residual_gate_logit) * self.residual_schedule_scale
+
+    def linear_prediction(self, x: torch.Tensor) -> torch.Tensor:
+        return self.linear(x)
+
+    def residual_correction(self, x: torch.Tensor) -> torch.Tensor:
+        return self.residual_gate_max * self.residual_gate() * self.residual(x)
+
+    def forward_with_alpha(self, x: torch.Tensor, alpha: float) -> torch.Tensor:
+        return self.linear_prediction(x) + (float(alpha) * self.residual_correction(x))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.linear(x) + self.residual(x)
+        return self.forward_with_alpha(x, 1.0)
 
 
 def build_dynamics_model(
@@ -499,9 +524,19 @@ def build_dynamics_model(
     hidden_dim: int,
     depth: int,
     linear_init: torch.Tensor | None = None,
+    *,
+    residual_gate_max: float = 0.5,
+    residual_gate_init: float = 0.05,
 ) -> nn.Module:
     if kind == "mlp":
         return LatentDynamicsMLP(latent_dim, hidden_dim, depth)
     if kind == "residual_linear":
-        return ResidualLinearDynamics(latent_dim, hidden_dim, depth, linear_init=linear_init)
+        return ResidualLinearDynamics(
+            latent_dim,
+            hidden_dim,
+            depth,
+            linear_init=linear_init,
+            residual_gate_max=residual_gate_max,
+            residual_gate_init=residual_gate_init,
+        )
     raise ValueError(f"Unsupported dynamics model: {kind}")

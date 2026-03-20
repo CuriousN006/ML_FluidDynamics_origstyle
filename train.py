@@ -37,6 +37,7 @@ DYN_SCHEDULER = "none"
 WEIGHT_DECAY = 1e-5
 LATENT_L1_WEIGHT = 1e-4
 DYN_L2_WEIGHT = 0.0
+DYN_DEVIATION_FROM_LINEAR_WEIGHT = 1e-3
 GRADIENT_LOSS_WEIGHT = 0.1
 FFT_LOSS_WEIGHT = 0.0
 ROLLOUT_LOSS_WEIGHT = 0.10
@@ -46,6 +47,12 @@ TRAIN_ROLLOUT_STRIDE = 8
 TRAIN_ROLLOUT_HORIZON = 24
 VALIDATION_ROLLOUT_STRIDE = 4
 VALIDATION_ROLLOUT_HORIZON = 24
+DYN_RESIDUAL_GATE_MAX = 0.5
+DYN_RESIDUAL_GATE_INIT = 0.05
+DYN_RESIDUAL_WARMUP_FRACTION = 0.35
+DYN_RESIDUAL_WARMUP_FLOOR = 0.1
+DYN_LINEAR_RELATIVE_PENALTY = 2.0
+DYN_SELECT_AFTER_WARMUP = True
 AE_MIN_LEARNING_RATE = 5e-6
 EARLY_STOPPING_PATIENCE = 5000
 DEVICE = "auto"
@@ -73,7 +80,7 @@ AE_CURRICULUM_COARSE_START = 0.40
 AE_CURRICULUM_GRADIENT_START = 0.05
 
 
-def build_config(*, smoke: bool, device_override: str | None, profile: str) -> NonlinearConfig:
+def build_config(*, smoke: bool, device_override: str | None, profile: str, ae_cache_dir: str | None) -> NonlinearConfig:
     ae_train_budget_seconds = None
     dyn_train_budget_seconds = None
     campaign = None
@@ -129,6 +136,7 @@ def build_config(*, smoke: bool, device_override: str | None, profile: str) -> N
         weight_decay=WEIGHT_DECAY,
         latent_l1_weight=LATENT_L1_WEIGHT,
         dyn_l2_weight=DYN_L2_WEIGHT,
+        dyn_deviation_from_linear_weight=DYN_DEVIATION_FROM_LINEAR_WEIGHT,
         gradient_loss_weight=GRADIENT_LOSS_WEIGHT,
         fft_loss_weight=FFT_LOSS_WEIGHT,
         rollout_loss_weight=ROLLOUT_LOSS_WEIGHT,
@@ -138,6 +146,12 @@ def build_config(*, smoke: bool, device_override: str | None, profile: str) -> N
         train_rollout_horizon=TRAIN_ROLLOUT_HORIZON,
         validation_rollout_stride=VALIDATION_ROLLOUT_STRIDE,
         validation_rollout_horizon=VALIDATION_ROLLOUT_HORIZON,
+        dyn_residual_gate_max=DYN_RESIDUAL_GATE_MAX,
+        dyn_residual_gate_init=DYN_RESIDUAL_GATE_INIT,
+        dyn_residual_warmup_fraction=DYN_RESIDUAL_WARMUP_FRACTION,
+        dyn_residual_warmup_floor=DYN_RESIDUAL_WARMUP_FLOOR,
+        dyn_linear_relative_penalty=DYN_LINEAR_RELATIVE_PENALTY,
+        dyn_select_after_warmup=DYN_SELECT_AFTER_WARMUP,
         ae_min_learning_rate=AE_MIN_LEARNING_RATE,
         early_stopping_patience=EARLY_STOPPING_PATIENCE,
         device=device_override or DEVICE,
@@ -146,6 +160,7 @@ def build_config(*, smoke: bool, device_override: str | None, profile: str) -> N
         save_checkpoint=SAVE_CHECKPOINT,
         ae_train_budget_seconds=ae_train_budget_seconds,
         dyn_train_budget_seconds=dyn_train_budget_seconds,
+        ae_cache_dir=ae_cache_dir,
     )
     return config.smoke() if smoke else config
 
@@ -169,9 +184,10 @@ def main() -> None:
     parser.add_argument("--ae-only", action="store_true", help="Train only the autoencoder and report AE-floor metrics.")
     parser.add_argument("--device", default=None, help="Explicit torch device override.")
     parser.add_argument("--profile", choices=("proxy", "speed90", "full"), default="full", help="Training budget profile.")
+    parser.add_argument("--ae-cache-dir", default=None, help="Optional cache directory with AE checkpoint and latent cache for dynamics-only reruns.")
     args = parser.parse_args()
 
-    config = build_config(smoke=args.smoke, device_override=args.device, profile=args.profile)
+    config = build_config(smoke=args.smoke, device_override=args.device, profile=args.profile, ae_cache_dir=args.ae_cache_dir)
     metrics = run_nonlinear_pipeline(config, ProjectPaths(root=ROOT), output_tag=args.output_tag, ae_only=args.ae_only)
     print_summary(metrics)
 

@@ -92,6 +92,7 @@ class NonlinearConfig:
     weight_decay: float = 1e-5
     latent_l1_weight: float = 1e-4
     dyn_l2_weight: float = 0.0
+    dyn_deviation_from_linear_weight: float = 1e-3
     gradient_loss_weight: float = 0.1
     fft_loss_weight: float = 0.0
     rollout_loss_weight: float = 0.15
@@ -121,6 +122,12 @@ class NonlinearConfig:
     train_rollout_horizon: int = 16
     validation_rollout_stride: int = 4
     validation_rollout_horizon: int = 24
+    dyn_residual_gate_max: float = 0.5
+    dyn_residual_gate_init: float = 0.05
+    dyn_residual_warmup_fraction: float = 0.35
+    dyn_residual_warmup_floor: float = 0.1
+    dyn_linear_relative_penalty: float = 2.0
+    dyn_select_after_warmup: bool = True
     early_stopping_patience: int = 20
     compare_steps: tuple[int, ...] = (100, 150)
     zoom_crop: tuple[int, int, int, int] = (0, 240, 20, 180)
@@ -132,6 +139,7 @@ class NonlinearConfig:
     save_checkpoint: bool = False
     ae_train_budget_seconds: float | None = None
     dyn_train_budget_seconds: float | None = None
+    ae_cache_dir: str | None = None
 
     def smoke(self) -> "NonlinearConfig":
         return replace(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import math
 import time
 from contextlib import nullcontext
@@ -101,6 +102,19 @@ class AutoencoderLossWeights:
 class SchedulerBundle:
     name: str
     scheduler: ReduceLROnPlateau | CosineAnnealingWarmRestarts | None
+
+
+@dataclass
+class AutoencoderCacheBundle:
+    model: nn.Module
+    stats: NormalizationStats
+    ae_metrics: dict[str, object]
+    latents: np.ndarray
+    reconstructed_frames: np.ndarray
+    coarse_frames: np.ndarray
+    latent_stats: LatentNormalizationStats
+    cache_dir: Path
+    metadata: dict[str, object]
 
 
 def _set_optimizer_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
@@ -218,6 +232,144 @@ def _maybe_save_autoencoder_checkpoint(model: nn.Module, output_dir: Path, *, sa
     torch.save(model.state_dict(), output_dir / "autoencoder.pt")
 
 
+def _resolve_ae_cache_dir(project_root: Path, output_dir: Path, requested: str | None) -> Path:
+    if requested is None:
+        return output_dir / "ae_cache"
+    cache_dir = Path(requested)
+    if not cache_dir.is_absolute():
+        cache_dir = project_root / cache_dir
+    return cache_dir
+
+
+def _compute_latent_stats(latents: np.ndarray, split: TemporalHoldoutSplit) -> LatentNormalizationStats:
+    return LatentNormalizationStats(
+        mean=latents[split.snapshot_train_idx].mean(axis=0).astype(np.float32),
+        std=(latents[split.snapshot_train_idx].std(axis=0) + 1e-6).astype(np.float32),
+    )
+
+
+def _save_ae_cache(
+    *,
+    cache_dir: Path,
+    model: nn.Module,
+    bundle: FieldBundle,
+    split: TemporalHoldoutSplit,
+    config: NonlinearConfig,
+    stats: NormalizationStats,
+    ae_metrics: dict[str, object],
+    latents: np.ndarray,
+    reconstructed_frames: np.ndarray,
+    coarse_frames: np.ndarray,
+    output_tag: str,
+) -> AutoencoderCacheBundle:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    latent_stats = _compute_latent_stats(latents, split)
+    torch.save(model.state_dict(), cache_dir / "ae_checkpoint.pt")
+    np.savez_compressed(
+        cache_dir / "ae_cache_arrays.npz",
+        latents=latents.astype(np.float32),
+        reconstructed_frames=reconstructed_frames.astype(np.float32),
+        coarse_frames=coarse_frames.astype(np.float32),
+        snapshot_mean=np.array(stats.mean, dtype=np.float32),
+        snapshot_std=np.array(stats.std, dtype=np.float32),
+        latent_mean=latent_stats.mean.astype(np.float32),
+        latent_std=latent_stats.std.astype(np.float32),
+    )
+    metadata: dict[str, object] = {
+        "created_at": utc_timestamp(),
+        "cache_format_version": 1,
+        "output_tag": output_tag,
+        "evaluation_protocol": split.protocol,
+        "field_name": bundle.field_name,
+        "layout": config.layout,
+        "input_shape": list(bundle.input_shape),
+        "num_snapshots": bundle.num_snapshots,
+        "snapshot_split": split.snapshot_indices(),
+        "transition_split": split.transition_indices(),
+        "config_summary": asdict(config),
+        "ae_config": {
+            "latent_dim": config.latent_dim,
+            "ae_architecture": config.ae_architecture,
+            "ae_width_mult": config.ae_width_mult,
+            "coordconv": config.coordconv,
+            "refine_blocks": config.refine_blocks,
+            "refine_channels_mult": config.refine_channels_mult,
+        },
+        "ae_metrics": ae_metrics,
+    }
+    write_json(cache_dir / "ae_cache.json", metadata)
+    return AutoencoderCacheBundle(
+        model=model,
+        stats=stats,
+        ae_metrics=ae_metrics,
+        latents=latents,
+        reconstructed_frames=reconstructed_frames,
+        coarse_frames=coarse_frames,
+        latent_stats=latent_stats,
+        cache_dir=cache_dir,
+        metadata=metadata,
+    )
+
+
+def _load_ae_cache(
+    *,
+    cache_dir: Path,
+    bundle: FieldBundle,
+    split: TemporalHoldoutSplit,
+    config: NonlinearConfig,
+    device: torch.device,
+) -> AutoencoderCacheBundle:
+    metadata_path = cache_dir / "ae_cache.json"
+    arrays_path = cache_dir / "ae_cache_arrays.npz"
+    checkpoint_path = cache_dir / "ae_checkpoint.pt"
+    if not metadata_path.exists() or not arrays_path.exists() or not checkpoint_path.exists():
+        raise FileNotFoundError(f"Incomplete AE cache in {cache_dir}")
+
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if metadata.get("evaluation_protocol") != split.protocol:
+        raise ValueError("AE cache protocol does not match the active evaluation protocol.")
+    if int(metadata.get("num_snapshots", -1)) != bundle.num_snapshots:
+        raise ValueError("AE cache snapshot count does not match the active dataset.")
+    if metadata.get("field_name") != bundle.field_name or metadata.get("layout") != config.layout:
+        raise ValueError("AE cache field/layout does not match the active configuration.")
+
+    ae_config = metadata["ae_config"]
+    if int(ae_config["latent_dim"]) != config.latent_dim:
+        raise ValueError("AE cache latent_dim does not match the current dynamics configuration.")
+
+    model = build_autoencoder(
+        bundle.input_shape,
+        int(ae_config["latent_dim"]),
+        str(ae_config["ae_architecture"]),
+        width_mult=float(ae_config["ae_width_mult"]),
+        coordconv=bool(ae_config["coordconv"]),
+        refine_blocks=int(ae_config["refine_blocks"]),
+        refine_channels_mult=float(ae_config["refine_channels_mult"]),
+    ).to(device)
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+
+    arrays = np.load(arrays_path)
+    stats = NormalizationStats(
+        mean=float(arrays["snapshot_mean"].item()),
+        std=float(arrays["snapshot_std"].item()),
+    )
+    latent_stats = LatentNormalizationStats(
+        mean=arrays["latent_mean"].astype(np.float32),
+        std=arrays["latent_std"].astype(np.float32),
+    )
+    return AutoencoderCacheBundle(
+        model=model,
+        stats=stats,
+        ae_metrics=metadata["ae_metrics"],
+        latents=arrays["latents"].astype(np.float32),
+        reconstructed_frames=arrays["reconstructed_frames"].astype(np.float32),
+        coarse_frames=arrays["coarse_frames"].astype(np.float32),
+        latent_stats=latent_stats,
+        cache_dir=cache_dir,
+        metadata=metadata,
+    )
+
+
 def _build_loader(
     dataset: Dataset[torch.Tensor],
     batch_size: int,
@@ -305,6 +457,12 @@ def _rollout_start_indices(indices: np.ndarray, stride: int) -> list[int]:
     return [int(indices[0])]
 
 
+def _dynamics_step(model: nn.Module, state: torch.Tensor, *, alpha: float | None = None) -> torch.Tensor:
+    if alpha is not None and hasattr(model, "forward_with_alpha"):
+        return model.forward_with_alpha(state, alpha)  # type: ignore[attr-defined]
+    return model(state)
+
+
 def _latent_rollout_loss(
     model: nn.Module,
     latent_tensor: torch.Tensor,
@@ -312,6 +470,7 @@ def _latent_rollout_loss(
     horizon: int,
     *,
     max_target_exclusive: int | None = None,
+    alpha: float | None = None,
 ) -> torch.Tensor:
     max_horizon = int(latent_tensor.shape[0] - start_index - 1)
     if max_target_exclusive is not None:
@@ -322,7 +481,7 @@ def _latent_rollout_loss(
     rollout_state = latent_tensor[start_index : start_index + 1]
     rollout_preds = []
     for _ in range(effective_horizon):
-        rollout_state = model(rollout_state)
+        rollout_state = _dynamics_step(model, rollout_state, alpha=alpha)
         rollout_preds.append(rollout_state)
     rollout_pred = torch.cat(rollout_preds, dim=0)
     rollout_target = latent_tensor[start_index + 1 : start_index + 1 + effective_horizon]
@@ -336,6 +495,7 @@ def _multi_start_rollout_loss(
     horizon: int,
     *,
     max_target_exclusive: int | None = None,
+    alpha: float | None = None,
 ) -> torch.Tensor:
     losses = [
         _latent_rollout_loss(
@@ -344,6 +504,7 @@ def _multi_start_rollout_loss(
             start_index,
             horizon,
             max_target_exclusive=max_target_exclusive,
+            alpha=alpha,
         )
         for start_index in start_indices
     ]
@@ -359,8 +520,9 @@ def _dynamics_validation_terms(
     config: NonlinearConfig,
     *,
     max_target_exclusive: int,
+    alpha: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    val_one_step = F.mse_loss(model(latent_tensor[val_idx]), latent_tensor[val_idx + 1])
+    val_one_step = F.mse_loss(_dynamics_step(model, latent_tensor[val_idx], alpha=alpha), latent_tensor[val_idx + 1])
     val_starts = _rollout_start_indices(val_idx, config.validation_rollout_stride)
     val_rollout = _multi_start_rollout_loss(
         model,
@@ -368,9 +530,51 @@ def _dynamics_validation_terms(
         start_indices=val_starts,
         horizon=min(config.validation_rollout_horizon, len(val_idx)),
         max_target_exclusive=max_target_exclusive,
+        alpha=alpha,
     )
     selection_loss = val_one_step + (config.validation_rollout_weight * val_rollout)
     return val_one_step, val_rollout, selection_loss
+
+
+def _alpha_sweep_diagnostics(
+    *,
+    model: nn.Module,
+    autoencoder: nn.Module,
+    bundle: FieldBundle,
+    stats: NormalizationStats,
+    latent_stats: LatentNormalizationStats,
+    initial_state_norm: np.ndarray,
+    compare_steps: tuple[int, ...],
+) -> dict[str, dict[str, object]]:
+    if not hasattr(model, "forward_with_alpha"):
+        return {}
+
+    diagnostics: dict[str, dict[str, object]] = {}
+    alpha_values = (0.0, 0.05, 0.1, 0.25, 0.5, 0.75, 1.0)
+    autoencoder.eval()
+    model.eval()
+    for alpha in alpha_values:
+        rollout_latents_norm = [initial_state_norm.astype(np.float32)]
+        current = torch.from_numpy(initial_state_norm.astype(np.float32)).unsqueeze(0)
+        with torch.no_grad():
+            for _ in range(1, bundle.num_snapshots):
+                current = _dynamics_step(model, current, alpha=alpha)
+                rollout_latents_norm.append(current.squeeze(0).cpu().numpy().astype(np.float32))
+            rollout_latents = _restore_latents(np.stack(rollout_latents_norm).astype(np.float32), latent_stats).astype(np.float32)
+            decoded = autoencoder.decode(torch.from_numpy(rollout_latents.astype(np.float32))).numpy()[:, 0]
+        rollout_frames = _denormalize(decoded, stats).astype(np.float32)
+        rollout_metrics = _compute_step_metrics(bundle.frames, rollout_frames, compare_steps)
+        step_100 = rollout_metrics.get("step_100", {"mse": 0.0, "rmse": 0.0, "nrmse": 0.0})
+        step_150 = rollout_metrics.get("step_150", {"mse": 0.0, "rmse": 0.0, "nrmse": 0.0})
+        diagnostics[f"alpha_{alpha:g}"] = {
+            "alpha": float(alpha),
+            "rmse_t100": step_100["rmse"],
+            "nrmse_t100": step_100["nrmse"],
+            "rmse_t150": step_150["rmse"],
+            "nrmse_t150": step_150["nrmse"],
+            "rollout_metrics": rollout_metrics,
+        }
+    return diagnostics
 
 
 def _evaluate_autoencoder(
@@ -924,13 +1128,12 @@ def _train_dynamics(
     config: NonlinearConfig,
     output_dir: Path,
     device: torch.device,
+    *,
+    latent_stats: LatentNormalizationStats | None = None,
 ) -> dict[str, object]:
     train_idx = split.transition_train_idx
     val_idx = split.transition_val_idx
-    latent_stats = LatentNormalizationStats(
-        mean=latents[split.snapshot_train_idx].mean(axis=0).astype(np.float32),
-        std=(latents[split.snapshot_train_idx].std(axis=0) + 1e-6).astype(np.float32),
-    )
+    latent_stats = latent_stats or _compute_latent_stats(latents, split)
     latents_norm = _standardize_latents(latents, latent_stats)
     linear_operator = _fit_linear_operator(latents_norm, train_idx)
     linear_init = torch.from_numpy(linear_operator.astype(np.float32))
@@ -941,9 +1144,14 @@ def _train_dynamics(
         config.dynamics_hidden_dim,
         config.dynamics_depth,
         linear_init=linear_init,
+        residual_gate_max=config.dyn_residual_gate_max,
+        residual_gate_init=config.dyn_residual_gate_init,
     ).to(device)
     if hasattr(model, "linear") and hasattr(model, "residual"):
-        optimizer = AdamW(model.residual.parameters(), lr=config.dyn_learning_rate, weight_decay=config.weight_decay)  # type: ignore[attr-defined]
+        residual_parameters = list(model.residual.parameters())  # type: ignore[attr-defined]
+        if hasattr(model, "residual_gate_logit"):
+            residual_parameters.append(model.residual_gate_logit)  # type: ignore[attr-defined]
+        optimizer = AdamW(residual_parameters, lr=config.dyn_learning_rate, weight_decay=config.weight_decay)
     else:
         optimizer = AdamW(model.parameters(), lr=config.dyn_learning_rate, weight_decay=config.weight_decay)
     scheduler = _build_scheduler(
@@ -953,9 +1161,20 @@ def _train_dynamics(
         config.dyn_scheduler_patience,
         config.dyn_min_learning_rate,
     )
-    history = {"train_loss": [], "val_loss": [], "val_one_step_loss": [], "val_rollout_loss": [], "learning_rate": []}
-    best_state = copy.deepcopy(model.state_dict())
-    best_loss = float("inf")
+    history = {
+        "train_loss": [],
+        "val_loss": [],
+        "val_one_step_loss": [],
+        "val_rollout_loss": [],
+        "val_selection_loss": [],
+        "val_linear_relative_penalty": [],
+        "deviation_from_linear_loss": [],
+        "learning_rate": [],
+        "progress_fraction": [],
+        "residual_warmup_progress": [],
+        "residual_schedule_scale": [],
+        "residual_effective_gate": [],
+    }
     patience = 0
     train_starts = _rollout_start_indices(train_idx, config.train_rollout_stride)
     stop_reason = "epoch_limit"
@@ -964,13 +1183,56 @@ def _train_dynamics(
 
     phase_start = time.perf_counter()
     train_start = phase_start
+    model.eval()
+    with torch.no_grad():
+        with _autocast_context(config.use_amp, device):
+            linear_val_one_step, linear_val_rollout, linear_val_loss = _dynamics_validation_terms(
+                model,
+                latent_tensor,
+                val_idx,
+                config,
+                max_target_exclusive=split.snapshot_val_stop,
+            )
+    linear_reference_validation = {
+        "one_step_loss": float(linear_val_one_step.item()),
+        "rollout_loss": float(linear_val_rollout.item()),
+        "base_selection_loss": float(linear_val_loss.item()),
+    }
+    linear_ref_rollout = float(linear_val_rollout.item())
+    best_state = copy.deepcopy(model.state_dict())
+    best_loss = float(linear_val_loss.item())
+    best_selection_loss = best_loss
+    best_epoch = 0
+    best_source = "linear_init"
+    best_val_one_step = float(linear_val_one_step.item())
+    best_val_rollout = float(linear_val_rollout.item())
+
     for _ in tqdm(range(config.dyn_epochs), desc="Dyn", leave=False):
+        epoch_index = len(history["val_loss"])
+        epoch_elapsed = time.perf_counter() - train_start
+        progress_fraction = _progress_fraction(
+            elapsed_seconds=epoch_elapsed,
+            budget_seconds=config.dyn_train_budget_seconds,
+            epoch_index=epoch_index,
+            total_epochs=config.dyn_epochs,
+        )
+        warmup_fraction = max(config.dyn_residual_warmup_fraction, 1e-6)
+        residual_warmup_progress = min(progress_fraction / warmup_fraction, 1.0)
+        schedule_scale = config.dyn_residual_warmup_floor + ((1.0 - config.dyn_residual_warmup_floor) * residual_warmup_progress)
+        if hasattr(model, "set_residual_schedule_scale"):
+            model.set_residual_schedule_scale(float(schedule_scale))  # type: ignore[attr-defined]
+
         model.train()
         optimizer.zero_grad(set_to_none=True)
         with _autocast_context(config.use_amp, device):
             prediction = model(latent_tensor[train_idx])
             target = latent_tensor[train_idx + 1]
             one_step_loss = F.mse_loss(prediction, target)
+            if hasattr(model, "linear_prediction"):
+                linear_prediction = model.linear_prediction(latent_tensor[train_idx])  # type: ignore[attr-defined]
+            else:
+                linear_prediction = prediction.detach()
+            deviation_from_linear_loss = F.mse_loss(prediction, linear_prediction)
             rollout_loss = _multi_start_rollout_loss(
                 model,
                 latent_tensor,
@@ -978,7 +1240,12 @@ def _train_dynamics(
                 horizon=min(config.train_rollout_horizon, len(train_idx)),
                 max_target_exclusive=split.snapshot_train_stop,
             )
-            loss = one_step_loss + (config.rollout_loss_weight * rollout_loss) + (config.dyn_l2_weight * _regularization_l2(model))
+            loss = (
+                one_step_loss
+                + (config.rollout_loss_weight * rollout_loss)
+                + (config.dyn_deviation_from_linear_weight * deviation_from_linear_loss)
+                + (config.dyn_l2_weight * _regularization_l2(model))
+            )
         if scaler is None:
             loss.backward()
             optimizer.step()
@@ -1003,14 +1270,34 @@ def _train_dynamics(
         history["val_loss"].append(val_loss.item())
         history["val_one_step_loss"].append(val_one_step.item())
         history["val_rollout_loss"].append(val_rollout.item())
+        linear_relative_penalty = max(0.0, float(val_rollout.item()) - linear_ref_rollout)
+        selection_loss = float(val_loss.item()) + (config.dyn_linear_relative_penalty * linear_relative_penalty)
+        history["val_selection_loss"].append(selection_loss)
+        history["val_linear_relative_penalty"].append(linear_relative_penalty)
+        history["deviation_from_linear_loss"].append(float(deviation_from_linear_loss.item()))
         _step_scheduler(scheduler, metric=val_loss.item())
         history["learning_rate"].append(float(optimizer.param_groups[0]["lr"]))
-        if val_loss.item() < best_loss:
-            best_loss = val_loss.item()
+        history["progress_fraction"].append(float(progress_fraction))
+        history["residual_warmup_progress"].append(float(residual_warmup_progress))
+        history["residual_schedule_scale"].append(float(schedule_scale))
+        if hasattr(model, "residual_correction"):
+            with torch.no_grad():
+                effective_gate = float(model.residual_correction(latent_tensor[train_idx][:1]).abs().mean().item())  # type: ignore[attr-defined]
+        else:
+            effective_gate = 0.0
+        history["residual_effective_gate"].append(effective_gate)
+        eligible_for_best = (not config.dyn_select_after_warmup) or (residual_warmup_progress >= 1.0)
+        if eligible_for_best and selection_loss < best_selection_loss:
+            best_loss = float(val_loss.item())
+            best_selection_loss = selection_loss
+            best_epoch = len(history["val_loss"])
+            best_source = "residual_checkpoint"
+            best_val_one_step = float(val_one_step.item())
+            best_val_rollout = float(val_rollout.item())
             best_state = copy.deepcopy(model.state_dict())
             patience = 0
         else:
-            patience += 1
+            patience = 0 if not eligible_for_best else (patience + 1)
         if time_budget_hit:
             stop_reason = "time_budget"
             break
@@ -1074,6 +1361,15 @@ def _train_dynamics(
         output_dir,
         config,
     )
+    alpha_sweep_metrics = _alpha_sweep_diagnostics(
+        model=model,
+        autoencoder=autoencoder,
+        bundle=bundle,
+        stats=stats,
+        latent_stats=latent_stats,
+        initial_state_norm=latents_norm[0],
+        compare_steps=compare_steps,
+    )
 
     dyn_end_to_end_seconds = time.perf_counter() - phase_start
     peak_memory_gb = float(torch.cuda.max_memory_allocated(device) / (1024**3)) if device.type == "cuda" else 0.0
@@ -1087,11 +1383,19 @@ def _train_dynamics(
         "epochs_ran": len(history["val_loss"]),
         "batches_ran": batches_ran,
         "stop_reason": stop_reason,
+        "best_epoch": best_epoch,
+        "best_source": best_source,
+        "best_base_val_loss": best_loss,
+        "best_selection_loss": best_selection_loss,
+        "best_val_one_step_loss": best_val_one_step,
+        "best_val_rollout_loss": best_val_rollout,
+        "linear_reference_validation": linear_reference_validation,
         "stopped_for_time_budget": stop_reason == "time_budget",
         "stopped_for_early_stopping": stop_reason == "early_stopping",
         "stopped_for_epoch_limit": stop_reason == "epoch_limit",
         "rollout_metrics": compare_metrics,
         "linear_baseline_metrics": linear_metrics,
+        "alpha_sweep_metrics": alpha_sweep_metrics,
         "peak_memory_gb_after_dyn": peak_memory_gb,
         "artifact_paths": {
             "training_curves": "dynamics_training_curves.png",
@@ -1125,14 +1429,51 @@ def run_nonlinear_pipeline(
     compare_steps = _compare_steps(config.compare_steps, bundle.num_snapshots)
     compare_step_regions = _compare_step_regions(compare_steps, split)
     _save_truth_reference(bundle, compare_steps, output_dir, config)
-
-    autoencoder, stats, ae_metrics, latents, reconstructed_frames, coarse_frames = _train_autoencoder(
-        bundle,
-        split,
-        config,
-        output_dir,
-        device,
-    )
+    cache_dir = _resolve_ae_cache_dir(paths.root, output_dir, config.ae_cache_dir)
+    using_ae_cache = config.ae_cache_dir is not None
+    if using_ae_cache:
+        cache_bundle = _load_ae_cache(
+            cache_dir=cache_dir,
+            bundle=bundle,
+            split=split,
+            config=config,
+            device=device,
+        )
+    else:
+        autoencoder, stats, ae_metrics, latents, reconstructed_frames, coarse_frames = _train_autoencoder(
+            bundle,
+            split,
+            config,
+            output_dir,
+            device,
+        )
+        cache_bundle = _save_ae_cache(
+            cache_dir=cache_dir,
+            model=autoencoder,
+            bundle=bundle,
+            split=split,
+            config=config,
+            stats=stats,
+            ae_metrics=ae_metrics,
+            latents=latents,
+            reconstructed_frames=reconstructed_frames,
+            coarse_frames=coarse_frames,
+            output_tag=output_tag,
+        )
+    autoencoder = cache_bundle.model
+    stats = cache_bundle.stats
+    ae_metrics = cache_bundle.ae_metrics
+    latents = cache_bundle.latents
+    reconstructed_frames = cache_bundle.reconstructed_frames
+    coarse_frames = cache_bundle.coarse_frames
+    latent_stats = cache_bundle.latent_stats
+    ae_cache_info = {
+        "used": using_ae_cache,
+        "cache_dir": str(cache_bundle.cache_dir),
+        "source_output_tag": cache_bundle.metadata.get("output_tag"),
+        "created_for_run": not using_ae_cache,
+        "ae_training_in_current_run": not using_ae_cache,
+    }
     ae_floor_metrics = _compute_step_metrics(bundle.frames, reconstructed_frames, compare_steps)
     coarse_floor_metrics = _compute_step_metrics(bundle.frames, coarse_frames, compare_steps)
     ae_floor_artifacts = _save_step_artifacts("ae_floor", bundle.frames, reconstructed_frames, compare_steps, output_dir, config)
@@ -1141,7 +1482,8 @@ def run_nonlinear_pipeline(
     coarse_t100 = coarse_floor_metrics.get("step_100", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
     coarse_t150 = coarse_floor_metrics.get("step_150", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
     ae_score = compute_ae_score(ae_metrics["recon_rmse"], ae_floor_t100["rmse"], ae_floor_t150["rmse"])
-    ae_wall_seconds = ae_metrics["ae_seconds"]
+    ae_wall_seconds = 0.0 if using_ae_cache else float(ae_metrics["ae_seconds"])
+    ae_wall_seconds_end_to_end = 0.0 if using_ae_cache else float(ae_metrics["ae_end_to_end_seconds"])
     ae_met_speed_target = bool(
         config.target_primary_score is not None
         and config.target_wall_seconds is not None
@@ -1167,6 +1509,7 @@ def run_nonlinear_pipeline(
             "compare_step_regions": compare_step_regions,
             "device": str(device),
             "screening_mode": "ae_only",
+            "ae_cache": ae_cache_info,
             "ae_train_budget_seconds": config.ae_train_budget_seconds,
             "dyn_train_budget_seconds": config.dyn_train_budget_seconds,
             "ae": {**ae_metrics, "floor_metrics": ae_floor_metrics},
@@ -1190,22 +1533,33 @@ def run_nonlinear_pipeline(
             "peak_memory_gb": ae_metrics["peak_memory_gb_after_ae"],
             "wall_seconds_mode": "training_only",
             "wall_seconds": ae_wall_seconds,
-            "wall_seconds_end_to_end": ae_metrics["ae_end_to_end_seconds"],
+            "wall_seconds_end_to_end": ae_wall_seconds_end_to_end,
             "artifacts": {
                 "truth_portrait": "truth_portrait.png",
                 "truth_wake_zoom": "truth_wake_zoom.png",
-                "ae_training_curves": "ae_training_curves.png",
-                "reconstruction_previews_full": ae_metrics["artifact_paths"]["reconstruction_previews_full"],
-                "reconstruction_previews_wake": ae_metrics["artifact_paths"]["reconstruction_previews_wake"],
+                "ae_training_curves": None if using_ae_cache else "ae_training_curves.png",
+                "reconstruction_previews_full": [] if using_ae_cache else ae_metrics["artifact_paths"]["reconstruction_previews_full"],
+                "reconstruction_previews_wake": [] if using_ae_cache else ae_metrics["artifact_paths"]["reconstruction_previews_wake"],
                 "ae_floor_full": ae_floor_artifacts["full"],
                 "ae_floor_wake": ae_floor_artifacts["wake"],
             },
         }
         write_json(output_dir / "metrics.json", metrics)
-        _maybe_save_autoencoder_checkpoint(autoencoder, output_dir, save_checkpoint=config.save_checkpoint)
+        if not using_ae_cache:
+            _maybe_save_autoencoder_checkpoint(autoencoder, output_dir, save_checkpoint=config.save_checkpoint)
         return metrics
 
-    dyn_metrics = _train_dynamics(latents, bundle, autoencoder, stats, split, config, output_dir, device)
+    dyn_metrics = _train_dynamics(
+        latents,
+        bundle,
+        autoencoder,
+        stats,
+        split,
+        config,
+        output_dir,
+        device,
+        latent_stats=latent_stats,
+    )
     rollout_metrics = dyn_metrics["rollout_metrics"]
     linear_metrics = dyn_metrics["linear_baseline_metrics"]
     step_100 = rollout_metrics.get("step_100", {"mse": 0.0, "nrmse": 0.0, "rmse": 0.0})
@@ -1213,8 +1567,8 @@ def run_nonlinear_pipeline(
     linear_t100 = linear_metrics.get("step_100", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
     linear_t150 = linear_metrics.get("step_150", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
     overall_score = primary_score(ae_metrics["recon_nrmse"], step_100["nrmse"], step_150["nrmse"])
-    wall_seconds = ae_metrics["ae_seconds"] + dyn_metrics["dyn_seconds"]
-    wall_seconds_end_to_end = ae_metrics["ae_end_to_end_seconds"] + dyn_metrics["dyn_end_to_end_seconds"]
+    wall_seconds = ae_wall_seconds + dyn_metrics["dyn_seconds"]
+    wall_seconds_end_to_end = ae_wall_seconds_end_to_end + dyn_metrics["dyn_end_to_end_seconds"]
     met_speed_target = bool(
         config.target_primary_score is not None
         and config.target_wall_seconds is not None
@@ -1239,6 +1593,7 @@ def run_nonlinear_pipeline(
         "transition_split": split.transition_indices(),
         "compare_step_regions": compare_step_regions,
         "device": str(device),
+        "ae_cache": ae_cache_info,
         "ae_train_budget_seconds": config.ae_train_budget_seconds,
         "dyn_train_budget_seconds": config.dyn_train_budget_seconds,
         "ae": {**ae_metrics, "floor_metrics": ae_floor_metrics},
@@ -1271,9 +1626,9 @@ def run_nonlinear_pipeline(
         "artifacts": {
             "truth_portrait": "truth_portrait.png",
             "truth_wake_zoom": "truth_wake_zoom.png",
-            "ae_training_curves": "ae_training_curves.png",
-            "reconstruction_previews_full": ae_metrics["artifact_paths"]["reconstruction_previews_full"],
-            "reconstruction_previews_wake": ae_metrics["artifact_paths"]["reconstruction_previews_wake"],
+            "ae_training_curves": None if using_ae_cache else "ae_training_curves.png",
+            "reconstruction_previews_full": [] if using_ae_cache else ae_metrics["artifact_paths"]["reconstruction_previews_full"],
+            "reconstruction_previews_wake": [] if using_ae_cache else ae_metrics["artifact_paths"]["reconstruction_previews_wake"],
             "ae_floor_full": ae_floor_artifacts["full"],
             "ae_floor_wake": ae_floor_artifacts["wake"],
             "dynamics_training_curves": "dynamics_training_curves.png",
@@ -1286,5 +1641,6 @@ def run_nonlinear_pipeline(
         },
     }
     write_json(output_dir / "metrics.json", metrics)
-    _maybe_save_autoencoder_checkpoint(autoencoder, output_dir, save_checkpoint=config.save_checkpoint)
+    if not using_ae_cache:
+        _maybe_save_autoencoder_checkpoint(autoencoder, output_dir, save_checkpoint=config.save_checkpoint)
     return metrics
