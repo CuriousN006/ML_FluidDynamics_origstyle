@@ -650,6 +650,96 @@ def _alpha_sweep_diagnostics(
     return diagnostics
 
 
+def _rollout_latents_norm(
+    *,
+    model: nn.Module,
+    initial_state_norm: np.ndarray,
+    num_snapshots: int,
+    alpha: float | None = None,
+) -> np.ndarray:
+    rollout_latents_norm = [initial_state_norm.astype(np.float32)]
+    current = torch.from_numpy(initial_state_norm.astype(np.float32)).unsqueeze(0)
+    with torch.no_grad():
+        for _ in range(1, num_snapshots):
+            current = _dynamics_step(model, current, alpha=alpha)
+            rollout_latents_norm.append(current.squeeze(0).cpu().numpy().astype(np.float32))
+    return np.stack(rollout_latents_norm).astype(np.float32)
+
+
+def _decode_rollout_frames(
+    *,
+    autoencoder: nn.Module,
+    rollout_latents_norm: np.ndarray,
+    latent_stats: LatentNormalizationStats,
+    stats: NormalizationStats,
+) -> tuple[np.ndarray, np.ndarray]:
+    rollout_latents = _restore_latents(rollout_latents_norm, latent_stats).astype(np.float32)
+    with torch.no_grad():
+        decoded = autoencoder.decode(torch.from_numpy(rollout_latents.astype(np.float32))).numpy()[:, 0]
+    rollout_frames = _denormalize(decoded, stats).astype(np.float32)
+    return rollout_latents, rollout_frames
+
+
+def _calibrate_deploy_alpha_on_validation(
+    *,
+    model: nn.Module,
+    autoencoder: nn.Module,
+    bundle: FieldBundle,
+    split: TemporalHoldoutSplit,
+    stats: NormalizationStats,
+    latent_stats: LatentNormalizationStats,
+    initial_state_norm: np.ndarray,
+    config: NonlinearConfig,
+) -> tuple[float, str, str, dict[str, dict[str, float]]]:
+    if not config.dyn_calibrate_deploy_alpha or not hasattr(model, "forward_with_alpha"):
+        return 1.0, "fixed_alpha_1", "disabled", {}
+
+    alpha_values = tuple(float(alpha) for alpha in config.dyn_deploy_alpha_grid if float(alpha) > 0.0)
+    if not alpha_values:
+        return 1.0, "fixed_alpha_1", "empty_grid", {}
+
+    val_idx = split.snapshot_val_idx
+    if len(val_idx) == 0:
+        return 1.0, "fixed_alpha_1", "empty_validation_window", {}
+
+    tail_weight = min(max(float(config.dyn_deploy_alpha_tail_weight), 0.0), 1.0)
+    metric_name = "decoded_val_late_weighted_nrmse"
+    scores: dict[str, dict[str, float]] = {}
+    best_alpha = alpha_values[0]
+    best_score = float("inf")
+
+    autoencoder.eval()
+    model.eval()
+    for alpha in alpha_values:
+        rollout_latents_norm = _rollout_latents_norm(
+            model=model,
+            initial_state_norm=initial_state_norm,
+            num_snapshots=bundle.num_snapshots,
+            alpha=alpha,
+        )
+        _, rollout_frames = _decode_rollout_frames(
+            autoencoder=autoencoder,
+            rollout_latents_norm=rollout_latents_norm,
+            latent_stats=latent_stats,
+            stats=stats,
+        )
+        val_nrmse = [nrmse(bundle.frames[int(idx)], rollout_frames[int(idx)]) for idx in val_idx]
+        mean_nrmse = float(np.mean(val_nrmse))
+        tail_nrmse = float(val_nrmse[-1])
+        score = ((1.0 - tail_weight) * mean_nrmse) + (tail_weight * tail_nrmse)
+        scores[f"alpha_{alpha:g}"] = {
+            "alpha": float(alpha),
+            "validation_mean_nrmse": mean_nrmse,
+            "validation_tail_nrmse": tail_nrmse,
+            "validation_score": score,
+        }
+        if score < best_score:
+            best_score = score
+            best_alpha = float(alpha)
+
+    return best_alpha, "validation_grid", metric_name, scores
+
+
 def _evaluate_autoencoder(
     model: nn.Module,
     loader: DataLoader[torch.Tensor],
@@ -1250,6 +1340,11 @@ def _train_dynamics(
         "residual_warmup_progress": [],
         "residual_schedule_scale": [],
         "residual_effective_gate": [],
+        "raw_gate_sigmoid": [],
+        "internal_residual_scale": [],
+        "train_correction_abs_mean": [],
+        "train_linear_abs_mean": [],
+        "train_correction_to_linear_ratio": [],
     }
     patience = 0
     train_starts = _rollout_start_indices(train_idx, config.train_rollout_stride)
@@ -1292,9 +1387,13 @@ def _train_dynamics(
             epoch_index=epoch_index,
             total_epochs=config.dyn_epochs,
         )
-        warmup_fraction = max(config.dyn_residual_warmup_fraction, 1e-6)
-        residual_warmup_progress = min(progress_fraction / warmup_fraction, 1.0)
-        schedule_scale = config.dyn_residual_warmup_floor + ((1.0 - config.dyn_residual_warmup_floor) * residual_warmup_progress)
+        if config.dyn_residual_warmup_fraction <= 0.0:
+            residual_warmup_progress = 1.0
+            schedule_scale = 1.0
+        else:
+            warmup_fraction = max(config.dyn_residual_warmup_fraction, 1e-6)
+            residual_warmup_progress = min(progress_fraction / warmup_fraction, 1.0)
+            schedule_scale = config.dyn_residual_warmup_floor + ((1.0 - config.dyn_residual_warmup_floor) * residual_warmup_progress)
         if hasattr(model, "set_residual_schedule_scale"):
             model.set_residual_schedule_scale(float(schedule_scale))  # type: ignore[attr-defined]
 
@@ -1356,12 +1455,27 @@ def _train_dynamics(
         history["progress_fraction"].append(float(progress_fraction))
         history["residual_warmup_progress"].append(float(residual_warmup_progress))
         history["residual_schedule_scale"].append(float(schedule_scale))
+        raw_gate_sigmoid = 0.0
+        internal_residual_scale = 0.0
+        correction_abs_mean = 0.0
+        linear_abs_mean = 0.0
+        if hasattr(model, "residual_gate_logit"):
+            raw_gate_sigmoid = float(torch.sigmoid(model.residual_gate_logit.detach()).item())  # type: ignore[attr-defined]
+        if hasattr(model, "residual_gate_max"):
+            internal_residual_scale = float(model.residual_gate_max) * raw_gate_sigmoid  # type: ignore[attr-defined]
         if hasattr(model, "residual_correction"):
             with torch.no_grad():
-                effective_gate = float(model.residual_correction(latent_tensor[train_idx][:1]).abs().mean().item())  # type: ignore[attr-defined]
-        else:
-            effective_gate = 0.0
-        history["residual_effective_gate"].append(effective_gate)
+                correction_abs_mean = float(model.residual_correction(latent_tensor[train_idx][:1]).abs().mean().item())  # type: ignore[attr-defined]
+        if hasattr(model, "linear_prediction"):
+            with torch.no_grad():
+                linear_abs_mean = float(model.linear_prediction(latent_tensor[train_idx][:1]).abs().mean().item())  # type: ignore[attr-defined]
+        correction_to_linear_ratio = correction_abs_mean / max(linear_abs_mean, 1e-8)
+        history["residual_effective_gate"].append(correction_abs_mean)
+        history["raw_gate_sigmoid"].append(raw_gate_sigmoid)
+        history["internal_residual_scale"].append(internal_residual_scale)
+        history["train_correction_abs_mean"].append(correction_abs_mean)
+        history["train_linear_abs_mean"].append(linear_abs_mean)
+        history["train_correction_to_linear_ratio"].append(correction_to_linear_ratio)
         eligible_for_best = (not config.dyn_select_after_warmup) or (residual_warmup_progress >= 1.0)
         if eligible_for_best and selection_loss < best_selection_loss:
             best_loss = float(val_loss.item())
@@ -1382,6 +1496,8 @@ def _train_dynamics(
             break
     dyn_seconds = time.perf_counter() - train_start
     model.load_state_dict(best_state)
+    if hasattr(model, "set_residual_schedule_scale"):
+        model.set_residual_schedule_scale(1.0)  # type: ignore[attr-defined]
     save_training_curves(
         {key: value for key, value in history.items() if key != "learning_rate"},
         output_dir / "dynamics_training_curves.png",
@@ -1389,16 +1505,43 @@ def _train_dynamics(
     )
 
     model.eval()
-    rollout_latents_norm = [latents_norm[0]]
-    current = latent_tensor[0:1]
-    with torch.no_grad():
-        for _ in range(1, bundle.num_snapshots):
-            current = model(current)
-            rollout_latents_norm.append(current.squeeze(0).cpu().numpy())
-    rollout_latents_norm_np = np.stack(rollout_latents_norm).astype(np.float32)
-    rollout_latents = _restore_latents(rollout_latents_norm_np, latent_stats).astype(np.float32)
     linear_rollout_latents_norm = _rollout_operator(linear_operator, latents_norm[0], bundle.num_snapshots)
     linear_rollout_latents = _restore_latents(linear_rollout_latents_norm, latent_stats).astype(np.float32)
+
+    autoencoder = autoencoder.to("cpu")
+    model = model.to("cpu")
+    if device.type == "cuda":
+        del latent_tensor
+        torch.cuda.empty_cache()
+
+    deploy_alpha, deploy_alpha_source, deploy_alpha_metric, deploy_alpha_scores = _calibrate_deploy_alpha_on_validation(
+        model=model,
+        autoencoder=autoencoder,
+        bundle=bundle,
+        split=split,
+        stats=stats,
+        latent_stats=latent_stats,
+        initial_state_norm=latents_norm[0],
+        config=config,
+    )
+    if hasattr(model, "set_residual_schedule_scale"):
+        model.set_residual_schedule_scale(1.0)  # type: ignore[attr-defined]
+
+    rollout_latents_norm_np = _rollout_latents_norm(
+        model=model,
+        initial_state_norm=latents_norm[0],
+        num_snapshots=bundle.num_snapshots,
+        alpha=deploy_alpha,
+    )
+    rollout_latents, predicted_frames = _decode_rollout_frames(
+        autoencoder=autoencoder,
+        rollout_latents_norm=rollout_latents_norm_np,
+        latent_stats=latent_stats,
+        stats=stats,
+    )
+    with torch.no_grad():
+        linear_recon = autoencoder.decode(torch.from_numpy(linear_rollout_latents.astype(np.float32))).numpy()[:, 0]
+    linear_frames = _denormalize(linear_recon, stats).astype(np.float32)
 
     save_latent_trajectory_pca(
         latents,
@@ -1412,18 +1555,6 @@ def _train_dynamics(
         output_dir / "latent_time_series.png",
         "Latent coordinates vs time",
     )
-
-    autoencoder = autoencoder.to("cpu")
-    model = model.to("cpu")
-    if device.type == "cuda":
-        del latent_tensor
-        torch.cuda.empty_cache()
-
-    with torch.no_grad():
-        predicted_recon = autoencoder.decode(torch.from_numpy(rollout_latents.astype(np.float32))).numpy()[:, 0]
-        linear_recon = autoencoder.decode(torch.from_numpy(linear_rollout_latents.astype(np.float32))).numpy()[:, 0]
-    predicted_frames = _denormalize(predicted_recon, stats).astype(np.float32)
-    linear_frames = _denormalize(linear_recon, stats).astype(np.float32)
 
     compare_steps = _compare_steps(config.compare_steps, bundle.num_snapshots)
     compare_metrics = _compute_step_metrics(bundle.frames, predicted_frames, compare_steps)
@@ -1446,6 +1577,10 @@ def _train_dynamics(
         initial_state_norm=latents_norm[0],
         compare_steps=compare_steps,
     )
+    raw_gate_sigmoid = float(torch.sigmoid(model.residual_gate_logit.detach()).item()) if hasattr(model, "residual_gate_logit") else 0.0  # type: ignore[attr-defined]
+    internal_residual_scale = (float(model.residual_gate_max) * raw_gate_sigmoid) if hasattr(model, "residual_gate_max") else raw_gate_sigmoid  # type: ignore[attr-defined]
+    final_schedule_scale = float(model.residual_schedule_scale.item()) if hasattr(model, "residual_schedule_scale") else 1.0  # type: ignore[attr-defined]
+    deploy_total_scale = float(deploy_alpha) * internal_residual_scale
 
     dyn_end_to_end_seconds = time.perf_counter() - phase_start
     peak_memory_gb = float(torch.cuda.max_memory_allocated(device) / (1024**3)) if device.type == "cuda" else 0.0
@@ -1472,6 +1607,15 @@ def _train_dynamics(
         "rollout_metrics": compare_metrics,
         "linear_baseline_metrics": linear_metrics,
         "alpha_sweep_metrics": alpha_sweep_metrics,
+        "deploy_alpha": float(deploy_alpha),
+        "deploy_alpha_source": deploy_alpha_source,
+        "deploy_alpha_metric": deploy_alpha_metric,
+        "deploy_alpha_scores": deploy_alpha_scores,
+        "deploy_schedule_scale_reset": True,
+        "raw_gate_sigmoid": raw_gate_sigmoid,
+        "internal_residual_scale": internal_residual_scale,
+        "deploy_total_scale": deploy_total_scale,
+        "final_schedule_scale": final_schedule_scale,
         "peak_memory_gb_after_dyn": peak_memory_gb,
         "artifact_paths": {
             "training_curves": "dynamics_training_curves.png",

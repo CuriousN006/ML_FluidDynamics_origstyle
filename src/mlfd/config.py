@@ -124,10 +124,13 @@ class NonlinearConfig:
     validation_rollout_horizon: int = 24
     dyn_residual_gate_max: float = 0.5
     dyn_residual_gate_init: float = 0.05
-    dyn_residual_warmup_fraction: float = 0.35
-    dyn_residual_warmup_floor: float = 0.1
-    dyn_linear_relative_penalty: float = 2.0
-    dyn_select_after_warmup: bool = True
+    dyn_residual_warmup_fraction: float = 0.0
+    dyn_residual_warmup_floor: float = 1.0
+    dyn_linear_relative_penalty: float = 0.0
+    dyn_select_after_warmup: bool = False
+    dyn_calibrate_deploy_alpha: bool = True
+    dyn_deploy_alpha_grid: tuple[float, ...] = (0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.35, 0.5, 0.75, 1.0)
+    dyn_deploy_alpha_tail_weight: float = 0.7
     early_stopping_patience: int = 20
     compare_steps: tuple[int, ...] = (100, 150)
     zoom_crop: tuple[int, int, int, int] = (0, 240, 20, 180)
