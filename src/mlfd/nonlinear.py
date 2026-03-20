@@ -241,6 +241,13 @@ def _resolve_ae_cache_dir(project_root: Path, output_dir: Path, requested: str |
     return cache_dir
 
 
+def _has_complete_ae_cache(cache_dir: Path) -> bool:
+    return all(
+        (cache_dir / filename).exists()
+        for filename in ("ae_cache.json", "ae_cache_arrays.npz", "ae_checkpoint.pt")
+    )
+
+
 def _compute_latent_stats(latents: np.ndarray, split: TemporalHoldoutSplit) -> LatentNormalizationStats:
     return LatentNormalizationStats(
         mean=latents[split.snapshot_train_idx].mean(axis=0).astype(np.float32),
@@ -326,12 +333,20 @@ def _load_ae_cache(
         raise FileNotFoundError(f"Incomplete AE cache in {cache_dir}")
 
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if int(metadata.get("cache_format_version", -1)) != 1:
+        raise ValueError("AE cache format version is unsupported.")
     if metadata.get("evaluation_protocol") != split.protocol:
         raise ValueError("AE cache protocol does not match the active evaluation protocol.")
     if int(metadata.get("num_snapshots", -1)) != bundle.num_snapshots:
         raise ValueError("AE cache snapshot count does not match the active dataset.")
     if metadata.get("field_name") != bundle.field_name or metadata.get("layout") != config.layout:
         raise ValueError("AE cache field/layout does not match the active configuration.")
+    if metadata.get("input_shape") != list(bundle.input_shape):
+        raise ValueError("AE cache input shape does not match the active dataset.")
+    if metadata.get("snapshot_split") != split.snapshot_indices():
+        raise ValueError("AE cache snapshot split does not match the active evaluation split.")
+    if metadata.get("transition_split") != split.transition_indices():
+        raise ValueError("AE cache transition split does not match the active evaluation split.")
 
     ae_config = metadata["ae_config"]
     if int(ae_config["latent_dim"]) != config.latent_dim:
@@ -349,6 +364,14 @@ def _load_ae_cache(
     model.load_state_dict(torch.load(checkpoint_path, map_location=device))
 
     arrays = np.load(arrays_path)
+    if arrays["latents"].shape[0] != bundle.num_snapshots:
+        raise ValueError("AE cache latent array does not match the number of snapshots.")
+    if arrays["reconstructed_frames"].shape != bundle.frames.shape:
+        raise ValueError("AE cache reconstructed frames shape does not match the active dataset.")
+    if arrays["coarse_frames"].shape != bundle.frames.shape:
+        raise ValueError("AE cache coarse frames shape does not match the active dataset.")
+    if arrays["latent_mean"].shape[0] != config.latent_dim or arrays["latent_std"].shape[0] != config.latent_dim:
+        raise ValueError("AE cache latent statistics do not match the current latent dimensionality.")
     stats = NormalizationStats(
         mean=float(arrays["snapshot_mean"].item()),
         std=float(arrays["snapshot_std"].item()),
@@ -368,6 +391,56 @@ def _load_ae_cache(
         cache_dir=cache_dir,
         metadata=metadata,
     )
+
+
+def _effective_metrics_config(
+    config: NonlinearConfig,
+    *,
+    cache_bundle: AutoencoderCacheBundle | None,
+    using_ae_cache: bool,
+) -> dict[str, object]:
+    effective = asdict(config)
+    if using_ae_cache and cache_bundle is not None:
+        effective.update(cache_bundle.metadata.get("ae_config", {}))
+    return effective
+
+
+def _ae_metrics_for_report(
+    ae_metrics: dict[str, object],
+    ae_floor_metrics: dict[str, dict[str, float]],
+    *,
+    using_ae_cache: bool,
+    cache_bundle: AutoencoderCacheBundle,
+    current_run_ae_seconds: float,
+    current_run_ae_end_to_end_seconds: float,
+) -> dict[str, object]:
+    report = dict(ae_metrics)
+    report["floor_metrics"] = ae_floor_metrics
+    if not using_ae_cache:
+        return report
+
+    historical_artifacts = report.get("artifact_paths", {})
+    report["reused_from_cache"] = True
+    report["cache_dir"] = str(cache_bundle.cache_dir)
+    report["cache_source_output_tag"] = cache_bundle.metadata.get("output_tag")
+    report["historical_source_metrics"] = {
+        "ae_seconds": report.get("ae_seconds"),
+        "ae_end_to_end_seconds": report.get("ae_end_to_end_seconds"),
+        "ae_artifact_seconds": report.get("ae_artifact_seconds"),
+        "peak_memory_gb_after_ae": report.get("peak_memory_gb_after_ae"),
+        "artifact_paths": historical_artifacts,
+    }
+    report["ae_seconds"] = current_run_ae_seconds
+    report["ae_end_to_end_seconds"] = current_run_ae_end_to_end_seconds
+    report["ae_artifact_seconds"] = max(0.0, current_run_ae_end_to_end_seconds - current_run_ae_seconds)
+    report["peak_memory_gb_after_ae"] = 0.0
+    report["artifact_paths"] = {
+        "training_curves": None,
+        "reconstruction_previews_full": [],
+        "reconstruction_previews_wake": [],
+        "cache_dir": str(cache_bundle.cache_dir),
+    }
+    return report
 
 
 def _build_loader(
@@ -1147,6 +1220,9 @@ def _train_dynamics(
         residual_gate_max=config.dyn_residual_gate_max,
         residual_gate_init=config.dyn_residual_gate_init,
     ).to(device)
+    if hasattr(model, "linear"):
+        for parameter in model.linear.parameters():  # type: ignore[attr-defined]
+            parameter.requires_grad_(False)
     if hasattr(model, "linear") and hasattr(model, "residual"):
         residual_parameters = list(model.residual.parameters())  # type: ignore[attr-defined]
         if hasattr(model, "residual_gate_logit"):
@@ -1421,6 +1497,7 @@ def run_nonlinear_pipeline(
     paths.ensure_directories()
     output_dir = paths.nonlinear_dir / output_tag
     output_dir.mkdir(parents=True, exist_ok=True)
+    pipeline_start = time.perf_counter()
     set_seed(config.seed, deterministic=config.deterministic)
 
     device = detect_device(config.device)
@@ -1429,8 +1506,10 @@ def run_nonlinear_pipeline(
     compare_steps = _compare_steps(config.compare_steps, bundle.num_snapshots)
     compare_step_regions = _compare_step_regions(compare_steps, split)
     _save_truth_reference(bundle, compare_steps, output_dir, config)
+    requested_config = asdict(config)
     cache_dir = _resolve_ae_cache_dir(paths.root, output_dir, config.ae_cache_dir)
-    using_ae_cache = config.ae_cache_dir is not None
+    using_ae_cache = config.ae_cache_dir is not None and _has_complete_ae_cache(cache_dir)
+    ae_stage_start = time.perf_counter()
     if using_ae_cache:
         cache_bundle = _load_ae_cache(
             cache_dir=cache_dir,
@@ -1460,6 +1539,7 @@ def run_nonlinear_pipeline(
             coarse_frames=coarse_frames,
             output_tag=output_tag,
         )
+    ae_stage_end_to_end_seconds = time.perf_counter() - ae_stage_start
     autoencoder = cache_bundle.model
     stats = cache_bundle.stats
     ae_metrics = cache_bundle.ae_metrics
@@ -1469,10 +1549,13 @@ def run_nonlinear_pipeline(
     latent_stats = cache_bundle.latent_stats
     ae_cache_info = {
         "used": using_ae_cache,
+        "mode": "load_existing" if using_ae_cache else "create_after_run",
+        "requested_cache_dir": config.ae_cache_dir,
         "cache_dir": str(cache_bundle.cache_dir),
         "source_output_tag": cache_bundle.metadata.get("output_tag"),
         "created_for_run": not using_ae_cache,
         "ae_training_in_current_run": not using_ae_cache,
+        "effective_ae_config": cache_bundle.metadata.get("ae_config"),
     }
     ae_floor_metrics = _compute_step_metrics(bundle.frames, reconstructed_frames, compare_steps)
     coarse_floor_metrics = _compute_step_metrics(bundle.frames, coarse_frames, compare_steps)
@@ -1483,7 +1566,17 @@ def run_nonlinear_pipeline(
     coarse_t150 = coarse_floor_metrics.get("step_150", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
     ae_score = compute_ae_score(ae_metrics["recon_rmse"], ae_floor_t100["rmse"], ae_floor_t150["rmse"])
     ae_wall_seconds = 0.0 if using_ae_cache else float(ae_metrics["ae_seconds"])
-    ae_wall_seconds_end_to_end = 0.0 if using_ae_cache else float(ae_metrics["ae_end_to_end_seconds"])
+    ae_wall_seconds_end_to_end = ae_stage_end_to_end_seconds if using_ae_cache else float(ae_metrics["ae_end_to_end_seconds"])
+    ae_report = _ae_metrics_for_report(
+        ae_metrics,
+        ae_floor_metrics,
+        using_ae_cache=using_ae_cache,
+        cache_bundle=cache_bundle,
+        current_run_ae_seconds=ae_wall_seconds,
+        current_run_ae_end_to_end_seconds=ae_wall_seconds_end_to_end,
+    )
+    effective_config = _effective_metrics_config(config, cache_bundle=cache_bundle, using_ae_cache=using_ae_cache)
+    ae_artifact_paths = ae_report.get("artifact_paths", {})
     ae_met_speed_target = bool(
         config.target_primary_score is not None
         and config.target_wall_seconds is not None
@@ -1503,7 +1596,8 @@ def run_nonlinear_pipeline(
             "field_name": bundle.field_name,
             "layout": config.layout,
             "summary": bundle.summary(),
-            "config": asdict(config),
+            "config": effective_config,
+            "requested_config": requested_config,
             "snapshot_split": split.snapshot_indices(),
             "transition_split": split.transition_indices(),
             "compare_step_regions": compare_step_regions,
@@ -1512,7 +1606,7 @@ def run_nonlinear_pipeline(
             "ae_cache": ae_cache_info,
             "ae_train_budget_seconds": config.ae_train_budget_seconds,
             "dyn_train_budget_seconds": config.dyn_train_budget_seconds,
-            "ae": {**ae_metrics, "floor_metrics": ae_floor_metrics},
+            "ae": ae_report,
             "ae_score": ae_score,
             "primary_score": ae_score,
             "recon_mse": ae_metrics["recon_mse"],
@@ -1530,16 +1624,16 @@ def run_nonlinear_pipeline(
             "ae_floor_mse_t150": ae_floor_t150["mse"],
             "ae_floor_rmse_t150": ae_floor_t150["rmse"],
             "ae_floor_nrmse_t150": ae_floor_t150["nrmse"],
-            "peak_memory_gb": ae_metrics["peak_memory_gb_after_ae"],
+            "peak_memory_gb": 0.0 if using_ae_cache else float(ae_metrics["peak_memory_gb_after_ae"]),
             "wall_seconds_mode": "training_only",
             "wall_seconds": ae_wall_seconds,
-            "wall_seconds_end_to_end": ae_wall_seconds_end_to_end,
+            "wall_seconds_end_to_end": time.perf_counter() - pipeline_start,
             "artifacts": {
                 "truth_portrait": "truth_portrait.png",
                 "truth_wake_zoom": "truth_wake_zoom.png",
-                "ae_training_curves": None if using_ae_cache else "ae_training_curves.png",
-                "reconstruction_previews_full": [] if using_ae_cache else ae_metrics["artifact_paths"]["reconstruction_previews_full"],
-                "reconstruction_previews_wake": [] if using_ae_cache else ae_metrics["artifact_paths"]["reconstruction_previews_wake"],
+                "ae_training_curves": ae_artifact_paths.get("training_curves"),
+                "reconstruction_previews_full": ae_artifact_paths.get("reconstruction_previews_full", []),
+                "reconstruction_previews_wake": ae_artifact_paths.get("reconstruction_previews_wake", []),
                 "ae_floor_full": ae_floor_artifacts["full"],
                 "ae_floor_wake": ae_floor_artifacts["wake"],
             },
@@ -1568,7 +1662,7 @@ def run_nonlinear_pipeline(
     linear_t150 = linear_metrics.get("step_150", {"rmse": 0.0, "mse": 0.0, "nrmse": 0.0})
     overall_score = primary_score(ae_metrics["recon_nrmse"], step_100["nrmse"], step_150["nrmse"])
     wall_seconds = ae_wall_seconds + dyn_metrics["dyn_seconds"]
-    wall_seconds_end_to_end = ae_wall_seconds_end_to_end + dyn_metrics["dyn_end_to_end_seconds"]
+    wall_seconds_end_to_end = time.perf_counter() - pipeline_start
     met_speed_target = bool(
         config.target_primary_score is not None
         and config.target_wall_seconds is not None
@@ -1588,7 +1682,8 @@ def run_nonlinear_pipeline(
         "field_name": bundle.field_name,
         "layout": config.layout,
         "summary": bundle.summary(),
-        "config": asdict(config),
+        "config": effective_config,
+        "requested_config": requested_config,
         "snapshot_split": split.snapshot_indices(),
         "transition_split": split.transition_indices(),
         "compare_step_regions": compare_step_regions,
@@ -1596,7 +1691,7 @@ def run_nonlinear_pipeline(
         "ae_cache": ae_cache_info,
         "ae_train_budget_seconds": config.ae_train_budget_seconds,
         "dyn_train_budget_seconds": config.dyn_train_budget_seconds,
-        "ae": {**ae_metrics, "floor_metrics": ae_floor_metrics},
+        "ae": ae_report,
         "dynamics": dyn_metrics,
         "ae_score": ae_score,
         "primary_score": overall_score,
@@ -1619,16 +1714,16 @@ def run_nonlinear_pipeline(
         "ae_floor_rmse_t150": ae_floor_t150["rmse"],
         "linear_latent_rmse_t100": linear_t100["rmse"],
         "linear_latent_rmse_t150": linear_t150["rmse"],
-        "peak_memory_gb": max(ae_metrics["peak_memory_gb_after_ae"], dyn_metrics["peak_memory_gb_after_dyn"]),
+        "peak_memory_gb": dyn_metrics["peak_memory_gb_after_dyn"] if using_ae_cache else max(float(ae_metrics["peak_memory_gb_after_ae"]), dyn_metrics["peak_memory_gb_after_dyn"]),
         "wall_seconds_mode": "training_only",
         "wall_seconds": wall_seconds,
         "wall_seconds_end_to_end": wall_seconds_end_to_end,
         "artifacts": {
             "truth_portrait": "truth_portrait.png",
             "truth_wake_zoom": "truth_wake_zoom.png",
-            "ae_training_curves": None if using_ae_cache else "ae_training_curves.png",
-            "reconstruction_previews_full": [] if using_ae_cache else ae_metrics["artifact_paths"]["reconstruction_previews_full"],
-            "reconstruction_previews_wake": [] if using_ae_cache else ae_metrics["artifact_paths"]["reconstruction_previews_wake"],
+            "ae_training_curves": ae_artifact_paths.get("training_curves"),
+            "reconstruction_previews_full": ae_artifact_paths.get("reconstruction_previews_full", []),
+            "reconstruction_previews_wake": ae_artifact_paths.get("reconstruction_previews_wake", []),
             "ae_floor_full": ae_floor_artifacts["full"],
             "ae_floor_wake": ae_floor_artifacts["wake"],
             "dynamics_training_curves": "dynamics_training_curves.png",

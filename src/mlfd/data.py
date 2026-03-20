@@ -38,6 +38,10 @@ class FieldBundle:
     def flattened_size(self) -> int:
         return int(self.matrix.shape[0])
 
+    @property
+    def input_shape(self) -> tuple[int, int]:
+        return (self.height, self.width)
+
     def summary(self) -> dict[str, object]:
         return {
             "field_name": self.field_name,
